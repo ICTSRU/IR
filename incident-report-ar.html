@@ -412,6 +412,7 @@
       <button type="button" class="btn-secondary" id="exportJsonBtn">تصدير JSON</button>
       <button type="button" class="btn-secondary" id="importJsonBtn">استيراد JSON</button>
       <button type="button" class="btn-secondary" id="pdfBtn">تصدير PDF</button>
+      <button type="button" class="btn-primary" id="sendBtn">إرسال</button>
       <button type="submit" class="btn-primary" id="generateBtn">إنشاء مستند Word</button>
     </div>
     <input type="file" id="importJsonInput" accept="application/json" style="display:none;">
@@ -423,7 +424,7 @@
 <iframe id="pdfFrame" style="position:fixed;left:-10000px;top:-10000px;width:0;height:0;border:0;" aria-hidden="true"></iframe>
 
 <script>
-const APP_VERSION = "1.5";
+const APP_VERSION = "1.6";
 const STORAGE_KEY = "ictd_incident_report_draft_v1";
 
 // After deploying the Apps Script Web App (Deploy > New deployment > Web app),
@@ -1233,6 +1234,45 @@ document.getElementById("versionTag").textContent = "نموذج تقرير حا�
     console.error(err);
   }
 })();
+
+document.getElementById("sendBtn").addEventListener("click", async () => {
+  const status = document.getElementById("status");
+  status.className = "status";
+  status.textContent = "";
+
+  const data = collectFormData();
+  if (!validateData(data)){
+    status.className = "status err";
+    status.textContent = "يرجى تعبئة جميع الحقول الإلزامية (المشار إليها بـ *) قبل الإرسال.";
+    return;
+  }
+
+  if (!SHEET_WEBAPP_URL){
+    status.className = "status err";
+    status.textContent = "لم يتم إعداد رابط Google Sheets بعد، لذا لا يمكن الحفظ أو الإرسال.";
+    return;
+  }
+
+  const sendBtn = document.getElementById("sendBtn");
+  sendBtn.disabled = true;
+  status.textContent = "جارٍ الحفظ وإرسال التقرير بالبريد...";
+  try{
+    await fetch(SHEET_WEBAPP_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({}, data, { version: APP_VERSION, sendEmail: true }))
+    });
+    status.className = "status ok";
+    status.textContent = "تم حفظ التقرير في Google Sheets، وإرسال نسخة PDF إلى m.elmahdy@sr.edu.sa. يرجى التحقق من البريد للتأكيد.";
+  }catch(err){
+    console.error(err);
+    status.className = "status err";
+    status.textContent = "تعذّر إتمام الإرسال. تحقّق من رابط الـ Web App واتصال الإنترنت.";
+  }finally{
+    sendBtn.disabled = false;
+  }
+});
 
 document.getElementById("saveSheetBtn").addEventListener("click", async () => {
   const status = document.getElementById("status");
