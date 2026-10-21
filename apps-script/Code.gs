@@ -1,43 +1,44 @@
 /**
  * =====================================================================
  *  نموذج تقرير حادثة تقنية معلومات — ICTD — Google Apps Script Web App
+ *  v3.0 — مبني من الصفر على البيانات الفعلية الموجودة مسبقًا
  *  مبني على SRU Secure Access Kit v1.4
  *  الدخول: حسابات Google الجامعية (@sr.edu.sa) + قائمة مصرّح لهم فقط
  * ---------------------------------------------------------------------
  *  الملفات:  Code.gs · Index.html · Logos.html · Denied.html
  *  النشر:    Deploy ▸ New deployment ▸ Web app
  *            Execute as: Me  ·  Who has access: Anyone within Sulaiman Al Rajhi University
- *  سجل الدخول: كل محاولة فتح → ورقة "AccessLog"
- *  قائمة الدخول: فقط البريد الإلكتروني النشط في ورقة "AllowedUsers" (ACCESS_MODE = 'LIST')
- *  التقارير: تُحفظ في ورقة "Reports" ويمكن استدعاؤها من القائمة المنسدلة في الصفحة
+ *
+ *  مهم جدًا: هذا الإصدار يرتبط مباشرة بالورقة الموجودة فعليًا
+ *  "Form responses 1" داخل جدول "سجل تقارير الحوادث - ICTD"،
+ *  بنفس ترتيب الأعمدة الحالي تمامًا (23 عمودًا)، ولا يُنشئ ورقة
+ *  جديدة ولا يُعدّل أي صف من الـ 19 صفًا التاريخية الموجودة فيها.
+ *  أي تقرير جديد يُضاف كصف جديد في نهاية نفس الورقة.
  * =====================================================================
  */
 
-/* ▼▼▼ CONFIG — خاص بهذه المنصة ▼▼▼ */
+/* ▼▼▼ CONFIG ▼▼▼ */
 const APP_NAME       = 'نموذج تقرير حادثة تقنية معلومات';
 const APP_NAME_EN    = 'IT Incident Report';
-const APP_VERSION    = '2.0';
+const APP_VERSION    = '3.0';
 const ALLOWED_DOMAIN = 'sr.edu.sa';
-const FAVICON_URL    = 'https://ictsru.github.io/IncidentReport/assets/itoc-logo.png';
+const FAVICON_URL    = 'https://ictsru.github.io/IR/assets/itoc-logo.png';
 
 /* سجل الدخول */
 const LOG_ENABLED        = true;
-// نفس جدول "سجل تقارير الحوادث - ICTD" المستخدم مسبقًا لهذا النظام
 const LOG_SPREADSHEET_ID = '1NCehfLQXMEzvgSKB8A2Oebtna_zVYwwZvsSFg3sUrmk';
 const SHEET_LOG          = 'AccessLog';
 const LOG_TIMEZONE       = 'Asia/Riyadh';
 const LOG_DEDUP_MINUTES  = 30;
 const LOG_RETENTION_DAYS = 180;
 
-/* قائمة الدخول (من يستطيع فتح المنصة) */
-const ACCESS_MODE          = 'LIST';   // قائمة مصرّح لهم فقط (وفق طلب المستخدم)
+/* قائمة الدخول */
+const ACCESS_MODE           = 'LIST';
 const ACCESS_SPREADSHEET_ID = '1NCehfLQXMEzvgSKB8A2Oebtna_zVYwwZvsSFg3sUrmk';
-const SHEET_ACCESS        = 'AllowedUsers';
-const OWNER_EMAILS        = ['m.elmahdy@sr.edu.sa']; // يسمح للمالك بالدخول دائمًا
+const SHEET_ACCESS          = 'AllowedUsers';
+const OWNER_EMAILS          = ['m.elmahdy@sr.edu.sa'];
 
-/* القائمة الافتراضية — تُضاف بواسطة setupAccessList() (الصفوف الموجودة تبقى كما هي) */
 const DEFAULT_ALLOWED = [
-  // [email, name, role, notes]
   ['nabounar@sr.edu.sa',    'Nasser Abounar', 'admin', 'CIO'],
   ['m.elmahdy@sr.edu.sa',   'Mohamed ElMahdy', 'admin', 'Owner — IT Operations Manager'],
   ['n.nawaz@sr.edu.sa',     '', 'user', ''],
@@ -54,20 +55,45 @@ const DEFAULT_ALLOWED = [
 ];
 const ACCESS_CACHE_SECONDS = 120;
 
-/* التقارير */
+/* ------------------------- التقارير (البيانات الفعلية) ------------------------- */
+// نفس الجدول ونفس الورقة الموجودة فعليًا — لا يُنشئ أي منهما إن كانا موجودين
 const REPORTS_SPREADSHEET_ID = '1NCehfLQXMEzvgSKB8A2Oebtna_zVYwwZvsSFg3sUrmk';
-const SHEET_REPORTS = 'Reports';
-const REPORTS_MAX_LIST = 300; // أحدث عدد من التقارير تُعرض في القائمة المنسدلة
+const SHEET_REPORTS = 'Form responses 1';
+const REPORTS_MAX_LIST = 500;
+const FORM_VERSION = '1.7'; // استمرارًا لتسلسل "إصدار النموذج" الحالي في البيانات (آخر قيمة كانت 1.6)
+
+// مجلد المرفقات في Drive (كما في الإصدارات السابقة لهذا النظام)
+const ATTACHMENTS_ROOT_FOLDER = 'مرفقات تقارير الحوادث - ICTD';
 /* ▲▲▲ CONFIG ▲▲▲ */
 
 const LOG_HEADERS = ['timestamp', 'date', 'time', 'day', 'email', 'result', 'version'];
 const DAYS_AR_    = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
-const REPORT_HEADERS = [
-  'id', 'updatedAt', 'submittedBy', 'title', 'department', 'incidentDate', 'incidentTime',
-  'location', 'category', 'severity', 'reporterName', 'reporterTitle', 'reporterContact',
-  'reportDate', 'description', 'actionsTaken', 'rootCause', 'impact', 'recommendations',
-  'preparedBy', 'approvedBy', 'dataJson'
+// ترتيب الأعمدة الفعلي في الورقة — يجب ألا يتغيّر هذا الترتيب أبدًا
+const REPORT_COLS = [
+  'timestamp',          // الطابع الزمني
+  'title',               // عنوان الحادثة
+  'incidentId',          // رقم الحادثة المرجعي
+  'department',          // الإدارة / القسم
+  'incidentDate',        // تاريخ الحادثة
+  'incidentTime',        // وقت الحادثة
+  'location',            // الموقع / النظام المتأثر
+  'category',            // التصنيف
+  'severity',            // مستوى الخطورة
+  'reporterName',        // مقدّم البلاغ
+  'reporterTitle',       // المسمى الوظيفي
+  'reporterContact',     // وسيلة التواصل
+  'reportDate',          // تاريخ التقرير
+  'description',         // وصف الحادثة
+  'actionsTaken',        // الإجراءات الفورية المتخذة
+  'rootCause',           // السبب الجذري
+  'impact',              // تقييم الأثر
+  'recommendations',     // التوصيات / الإجراءات التصحيحية
+  'preparedBy',          // أُعد بواسطة
+  'approvedBy',          // روجع / اعتمد بواسطة
+  'attachmentCount',     // عدد المرفقات
+  'attachmentNames',     // أسماء المرفقات
+  'formVersion'          // إصدار النموذج
 ];
 
 /* ----------------------------- Web app ------------------------------ */
@@ -100,89 +126,154 @@ function doGet() {
 /* ------------------- استدعاءات الصفحة (Reports) ----------------------- */
 /*  كل دالة تُستدعى عبر google.script.run يجب أن تبدأ بـ requireSruUser_()  */
 
-/** يحفظ تقريرًا جديدًا أو يحدّث تقريرًا موجودًا (إن وُجد نفس id). يعيد {ok, id}. */
-function saveReport(data) {
+/**
+ * يحفظ تقريرًا جديدًا (rowNumber=0) أو يُحدّث صفًا موجودًا (rowNumber>0).
+ * files: [{name, mimeType, base64}] اختياري — عند التحديث بلا ملفات جديدة
+ * تبقى بيانات المرفقات القديمة كما هي دون تغيير.
+ * يعيد {ok, id, row}.
+ */
+function saveReport(data, files, rowNumber) {
   const email = requireSruUser_();
   data = data || {};
-  const sh = reportsSheet_(true);
+  files = files || [];
+  rowNumber = Number(rowNumber) || 0;
+  const sh = reportsSheet_();
 
-  let id = String(data.incidentId || '').trim();
-  const existingRow = id ? findReportRow_(sh, id) : 0;
+  let incidentId = String(data.incidentId || '').trim();
+  let timestamp = new Date();
+  let attachmentCount = 0;
+  let attachmentNames = '';
 
-  if (!id) {
-    id = generateIncidentId_(sh);
+  if (rowNumber > 0) {
+    // تحديث: حافظ على الطابع الزمني الأصلي وبيانات المرفقات إن لم تُرفع ملفات جديدة
+    const existing = sh.getRange(rowNumber, 1, 1, REPORT_COLS.length).getValues()[0];
+    timestamp = existing[0] instanceof Date ? existing[0] : new Date();
+    attachmentCount = existing[REPORT_COLS.indexOf('attachmentCount')] || 0;
+    attachmentNames = existing[REPORT_COLS.indexOf('attachmentNames')] || '';
+    if (!incidentId) incidentId = existing[REPORT_COLS.indexOf('incidentId')] || '';
   }
 
-  const now = new Date();
-  const dataJson = safeJson_(Object.assign({}, data, { incidentId: id }));
-  const row = [
-    id, now, email,
-    data.title || '', data.department || '', data.incidentDate || '', data.incidentTime || '',
-    data.location || '', data.category || '', data.severity || '',
-    data.reporterName || '', data.reporterTitle || '', data.reporterContact || '', data.reportDate || '',
-    data.description || '', data.actionsTaken || '', data.rootCause || '', data.impact || '',
-    data.recommendations || '', data.preparedBy || '', data.approvedBy || '', dataJson
-  ];
+  if (!incidentId) {
+    incidentId = generateIncidentId_(sh);
+  }
 
-  if (existingRow) {
-    sh.getRange(existingRow, 1, 1, REPORT_HEADERS.length).setValues([row]);
+  let uploadedLinks = null;
+  if (files.length) {
+    const uploaded = uploadAttachments_(incidentId, files);
+    attachmentCount = uploaded.length;
+    attachmentNames = uploaded.map(f => f.name).join(', ');
+    uploadedLinks = uploaded; // [{name, url}]
+  }
+
+  const rowObj = Object.assign({}, data, {
+    timestamp: timestamp,
+    incidentId: incidentId,
+    attachmentCount: attachmentCount,
+    attachmentNames: attachmentNames,
+    formVersion: FORM_VERSION
+  });
+  const row = REPORT_COLS.map(key => rowObj[key] !== undefined ? rowObj[key] : '');
+
+  let targetRow;
+  if (rowNumber > 0) {
+    sh.getRange(rowNumber, 1, 1, REPORT_COLS.length).setValues([row]);
+    targetRow = rowNumber;
   } else {
     sh.appendRow(row);
+    targetRow = sh.getLastRow();
   }
-  return { ok: true, id: id };
+
+  const result = { ok: true, id: incidentId, row: targetRow };
+  if (uploadedLinks) {
+    result.attachmentNames = uploadedLinks.map(f => f.name);
+    result.attachmentLinks = uploadedLinks.map(f => f.url);
+  } else if (attachmentNames) {
+    result.attachmentNames = attachmentNames.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return result;
 }
 
-/** يعيد قائمة مختصرة لأحدث التقارير (للقائمة المنسدلة). */
+/** يعيد قائمة مختصرة لكل التقارير (الأحدث أولًا) للقائمة المنسدلة. */
 function listReports() {
   requireSruUser_();
-  const sh = reportsSheet_(false);
-  if (!sh || sh.getLastRow() < 2) return [];
+  const sh = reportsSheet_();
   const last = sh.getLastRow();
-  const n = Math.min(last - 1, 2000); // سقف أمان للقراءة
-  const startRow = last - n + 1;
-  const idCol = REPORT_HEADERS.indexOf('id') + 1;
-  const values = sh.getRange(startRow, 1, n, REPORT_HEADERS.length).getValues();
-
-  const items = values
-    .filter(r => r[idCol - 1])
-    .map(r => ({
-      id: r[0], updatedAt: r[1] instanceof Date ? r[1].toISOString() : String(r[1] || ''),
-      title: r[3], department: r[4], incidentDate: r[5], severity: r[9]
-    }))
-    .reverse()
-    .slice(0, REPORTS_MAX_LIST);
-  return items;
-}
-
-/** يعيد بيانات تقرير كاملة بمعرّفه، لتعبئة النموذج منها. */
-function getReport(id) {
-  requireSruUser_();
-  const sh = reportsSheet_(false);
-  if (!sh) return null;
-  const row = findReportRow_(sh, id);
-  if (!row) return null;
-  const jsonCol = REPORT_HEADERS.indexOf('dataJson') + 1;
-  const json = sh.getRange(row, jsonCol, 1, 1).getValue();
-  try { return JSON.parse(json); } catch (e) { return null; }
-}
-
-function findReportRow_(sh, id) {
-  if (!sh || sh.getLastRow() < 2) return 0;
-  const idCol = REPORT_HEADERS.indexOf('id') + 1;
-  const ids = sh.getRange(2, idCol, sh.getLastRow() - 1, 1).getValues();
-  for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === String(id)) return i + 2;
+  if (last < 2) return [];
+  const n = last - 1;
+  const values = sh.getRange(2, 1, n, REPORT_COLS.length).getValues();
+  const items = [];
+  for (let i = 0; i < values.length; i++) {
+    const r = values[i];
+    const rowNum = i + 2;
+    if (!r[REPORT_COLS.indexOf('title')]) continue; // صف فارغ
+    items.push({
+      row: rowNum,
+      id: r[REPORT_COLS.indexOf('incidentId')] || '',
+      title: r[REPORT_COLS.indexOf('title')] || '',
+      incidentDate: formatMaybeDate_(r[REPORT_COLS.indexOf('incidentDate')]),
+      severity: r[REPORT_COLS.indexOf('severity')] || '',
+      timestamp: r[REPORT_COLS.indexOf('timestamp')] instanceof Date
+        ? r[REPORT_COLS.indexOf('timestamp')].toISOString() : ''
+    });
   }
-  return 0;
+  items.reverse(); // الأحدث أولًا
+  return items.slice(0, REPORTS_MAX_LIST);
+}
+
+/** يعيد بيانات تقرير كاملة برقم صفه في الورقة. */
+function getReport(rowNumber) {
+  requireSruUser_();
+  rowNumber = Number(rowNumber);
+  if (!rowNumber || rowNumber < 2) return null;
+  const sh = reportsSheet_();
+  if (rowNumber > sh.getLastRow()) return null;
+  const values = sh.getRange(rowNumber, 1, 1, REPORT_COLS.length).getValues()[0];
+  const obj = { row: rowNumber };
+  REPORT_COLS.forEach((key, idx) => {
+    let v = values[idx];
+    if (v instanceof Date) {
+      v = key === 'timestamp' ? v.toISOString() : formatMaybeDate_(v);
+    }
+    obj[key] = v;
+  });
+
+  // تحويل أسماء المرفقات المخزنة (نص مفصول بفواصل) إلى قائمة
+  const namesRaw = String(obj.attachmentNames || '');
+  obj.attachmentNames = namesRaw ? namesRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  // محاولة إيجاد مجلد المرفقات (إن وُجد) لعرض روابط التنزيل، مرتّبة لتطابق attachmentNames
+  obj.attachmentLinks = [];
+  try {
+    if (obj.incidentId) {
+      const folder = findIncidentFolder_(obj.incidentId);
+      if (folder) {
+        const byName = {};
+        const it = folder.getFiles();
+        while (it.hasNext()) {
+          const f = it.next();
+          byName[f.getName()] = f.getUrl();
+        }
+        obj.attachmentLinks = obj.attachmentNames.map(n => byName[n] || '');
+      }
+    }
+  } catch (e) { /* تجاهل أي خطأ في البحث عن المرفقات */ }
+
+  return obj;
+}
+
+function formatMaybeDate_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, LOG_TIMEZONE, 'yyyy-MM-dd');
+  return v || '';
 }
 
 function generateIncidentId_(sh) {
   const year = new Date().getFullYear();
   const prefix = 'INC-' + year + '-';
   let max = 0;
-  if (sh && sh.getLastRow() > 1) {
-    const idCol = REPORT_HEADERS.indexOf('id') + 1;
-    const ids = sh.getRange(2, idCol, sh.getLastRow() - 1, 1).getValues();
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const idCol = REPORT_COLS.indexOf('incidentId') + 1;
+    const ids = sh.getRange(2, idCol, last - 1, 1).getValues();
     ids.forEach(r => {
       const s = String(r[0] || '');
       if (s.indexOf(prefix) === 0) {
@@ -194,18 +285,48 @@ function generateIncidentId_(sh) {
   return prefix + String(max + 1).padStart(3, '0');
 }
 
-function reportsSheet_(create) {
-  const ss = REPORTS_SPREADSHEET_ID ? SpreadsheetApp.openById(REPORTS_SPREADSHEET_ID) : SpreadsheetApp.getActiveSpreadsheet();
-  let sh = ss.getSheetByName(SHEET_REPORTS);
-  if (!sh && create) {
-    sh = ss.insertSheet(SHEET_REPORTS);
-    sh.getRange(1, 1, 1, REPORT_HEADERS.length).setValues([REPORT_HEADERS])
-      .setFontWeight('bold').setFontColor('#ffffff').setBackground('#501e8c');
-    sh.setFrozenRows(1);
-    sh.setRightToLeft(true);
-    sh.getRange('B:B').setNumberFormat('yyyy-mm-dd hh:mm:ss');
-  }
+function reportsSheet_() {
+  const ss = SpreadsheetApp.openById(REPORTS_SPREADSHEET_ID);
+  const sh = ss.getSheetByName(SHEET_REPORTS);
+  if (!sh) throw new Error('تعذّر إيجاد الورقة "' + SHEET_REPORTS + '" — تحقق من اسم التبويب في الجدول.');
   return sh;
+}
+
+/* ---------------------------- المرفقات (Drive) ---------------------------- */
+
+function uploadAttachments_(incidentId, files) {
+  const folder = getOrCreateIncidentFolder_(incidentId);
+  const uploaded = [];
+  files.forEach(f => {
+    try {
+      const bytes = Utilities.base64Decode(f.base64);
+      const blob = Utilities.newBlob(bytes, f.mimeType || 'application/octet-stream', f.name || 'ملف');
+      const file = folder.createFile(blob);
+      uploaded.push({ name: file.getName(), url: file.getUrl() });
+    } catch (e) {
+      console.error('uploadAttachments_ failed for ' + f.name + ': ' + e);
+    }
+  });
+  return uploaded;
+}
+
+function getOrCreateIncidentFolder_(incidentId) {
+  const root = getOrCreateRootAttachmentsFolder_();
+  const existing = findIncidentFolder_(incidentId, root);
+  if (existing) return existing;
+  return root.createFolder(incidentId);
+}
+
+function findIncidentFolder_(incidentId, rootOpt) {
+  const root = rootOpt || getOrCreateRootAttachmentsFolder_();
+  const it = root.getFoldersByName(incidentId);
+  return it.hasNext() ? it.next() : null;
+}
+
+function getOrCreateRootAttachmentsFolder_() {
+  const it = DriveApp.getFoldersByName(ATTACHMENTS_ROOT_FOLDER);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(ATTACHMENTS_ROOT_FOLDER);
 }
 
 /* ------------------------------ Access ------------------------------ */
@@ -270,7 +391,6 @@ function accessSheet_(create) {
   return sh;
 }
 
-/** تشغّل مرة واحدة من المحرر: تنشئ تبويب AllowedUsers وتضيف المالك والفريق الافتراضي. */
 function setupAccessList() {
   const sh = accessSheet_(true);
   const n = Math.max(sh.getLastRow() - 1, 0);
@@ -390,10 +510,4 @@ function showWebAppUrl() {
 
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
-}
-function safeJson_(obj) {
-  var s = JSON.stringify(obj).replace(/</g, '\u003c');
-  s = s.split(String.fromCharCode(8232)).join("\u2028");
-  s = s.split(String.fromCharCode(8233)).join("\u2029");
-  return s;
 }

@@ -36,6 +36,16 @@
 
   .history-card{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;}
   .history-card .field{flex:1;min-width:240px;}
+  .mode-badge{font-size:12px;font-weight:700;padding:5px 12px;border-radius:12px;background:var(--purple-light);color:var(--purple-dark);white-space:nowrap;}
+  .mode-badge.editing{background:#fcebd8;color:#8a4b10;}
+
+  .attach-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+  .attach-item{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px;}
+  .attach-item a{color:var(--blue);text-decoration:none;}
+  .attach-item a:hover{text-decoration:underline;}
+  .file-input-wrap{display:flex;flex-direction:column;gap:8px;}
+  input[type=file]{font-family:inherit;font-size:12.5px;padding:8px;border:1px dashed var(--border);border-radius:var(--radius);background:#fff;}
+  .pending-files{font-size:12px;color:var(--muted);}
 
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;}
   .field{display:flex;flex-direction:column;gap:5px;}
@@ -99,12 +109,13 @@
 
   <div class="card history-card">
     <div class="field">
-      <label>استدعاء تقرير سابق</label>
+      <label>مراجعة تقرير سابق</label>
       <select id="reportSelect">
         <option value="">— تقرير جديد —</option>
       </select>
     </div>
     <button type="button" class="btn-secondary" id="newReportBtn">تقرير جديد</button>
+    <span class="mode-badge" id="modeBadge">تقرير جديد</span>
     <span class="status info" id="historyStatus" style="margin:0 6px;"></span>
   </div>
 
@@ -208,6 +219,15 @@
           <label>التوصيات / الإجراءات التصحيحية</label>
           <textarea id="recommendations" placeholder="التدابير الوقائية أو التصحيحية المقترحة"></textarea>
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>المرفقات</h2>
+      <div class="file-input-wrap">
+        <input type="file" id="attachInput" multiple>
+        <div class="pending-files" id="pendingFiles"></div>
+        <div id="existingAttachments"></div>
       </div>
     </div>
 
@@ -438,6 +458,13 @@ async function buildDocx(data){
         new Table({ width: { size: 9000, type: WidthType.DXA }, rows: [
           fieldRow("أُعد بواسطة", data.preparedBy), fieldRow("روجع / اعتمد بواسطة", data.approvedBy)
         ] }),
+        spacer(220),
+        sectionHeading("المرفقات", "٩"), spacer(60),
+        (data.attachmentNames && data.attachmentNames.length)
+          ? new Table({ width: { size: 9000, type: WidthType.DXA }, rows:
+              data.attachmentNames.map((name, i) => fieldRow("مرفق " + (i + 1), name))
+            })
+          : bodyBox(""),
       ]
     }]
   });
@@ -478,18 +505,88 @@ function fillForm(data){
   if (data.category) catEl.value = data.category;
   const sevInput = document.querySelector('input[name="severity"][value="' + (data.severity || "متوسطة") + '"]');
   if (sevInput) sevInput.checked = true;
+
+  renderExistingAttachments(data.attachmentNames, data.attachmentLinks);
+  clearPendingFiles();
 }
 
 function clearForm(){
   document.getElementById("incidentForm").reset();
   setVal("incidentId", "");
   document.getElementById("status").textContent = "";
+  renderExistingAttachments([], []);
+  clearPendingFiles();
+}
+
+/* ------------------------------ Attachments ------------------------------ */
+
+const attachInput = document.getElementById("attachInput");
+const pendingFilesEl = document.getElementById("pendingFiles");
+const existingAttachmentsEl = document.getElementById("existingAttachments");
+
+function clearPendingFiles(){
+  attachInput.value = "";
+  pendingFilesEl.innerHTML = "";
+}
+
+function renderExistingAttachments(names, links){
+  names = names || [];
+  links = links || [];
+  if (!names.length){ existingAttachmentsEl.innerHTML = ""; return; }
+  let html = '<div class="attach-list"><b>مرفقات محفوظة سابقًا:</b>';
+  names.forEach(function (name, i) {
+    const link = links[i];
+    html += '<div class="attach-item">' + (i + 1) + ". " +
+      (link ? '<a href="' + link + '" target="_blank" rel="noopener">' + name + "</a>" : name) +
+      "</div>";
+  });
+  html += "</div>";
+  existingAttachmentsEl.innerHTML = html;
+}
+
+attachInput.addEventListener("change", function () {
+  pendingFilesEl.innerHTML = "";
+  Array.from(attachInput.files || []).forEach(function (f) {
+    const div = document.createElement("div");
+    div.className = "attach-item";
+    div.textContent = "+ " + f.name;
+    pendingFilesEl.appendChild(div);
+  });
+});
+
+function readFilesAsBase64(fileList){
+  const files = Array.from(fileList || []);
+  if (!files.length) return Promise.resolve([]);
+  return Promise.all(files.map(function (f) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        const base64 = String(reader.result).split(",").pop();
+        resolve({ name: f.name, mimeType: f.type || "application/octet-stream", base64: base64 });
+      };
+      reader.onerror = function () { reject(new Error("تعذّرت قراءة الملف: " + f.name)); };
+      reader.readAsDataURL(f);
+    });
+  }));
 }
 
 /* ------------------------------ History dropdown ------------------------------ */
 
 const reportSelect = document.getElementById("reportSelect");
 const historyStatus = document.getElementById("historyStatus");
+const modeBadge = document.getElementById("modeBadge");
+let currentRow = 0;
+
+function setMode(row){
+  currentRow = row || 0;
+  if (currentRow){
+    modeBadge.textContent = "تعديل تقرير محفوظ (صف " + currentRow + ")";
+    modeBadge.classList.add("editing");
+  } else {
+    modeBadge.textContent = "تقرير جديد";
+    modeBadge.classList.remove("editing");
+  }
+}
 
 function refreshReportList(keepSelection){
   const prev = keepSelection ? reportSelect.value : "";
@@ -499,8 +596,8 @@ function refreshReportList(keepSelection){
       reportSelect.innerHTML = '<option value="">— تقرير جديد —</option>';
       (items || []).forEach(function (r) {
         const opt = document.createElement("option");
-        opt.value = r.id;
-        opt.textContent = r.id + " — " + (r.title || "بدون عنوان") + " — " + (r.incidentDate || "") + " — " + (r.severity || "");
+        opt.value = r.row;
+        opt.textContent = (r.id || "بدون رقم") + " — " + (r.title || "بدون عنوان") + " — " + (r.incidentDate || "") + " — " + (r.severity || "");
         reportSelect.appendChild(opt);
       });
       if (prev) reportSelect.value = prev;
@@ -513,34 +610,37 @@ function refreshReportList(keepSelection){
 }
 
 reportSelect.addEventListener("change", function () {
-  const id = reportSelect.value;
-  if (!id) { clearForm(); return; }
+  const row = Number(reportSelect.value) || 0;
+  if (!row) { setMode(0); clearForm(); return; }
   historyStatus.textContent = "جارٍ تحميل التقرير...";
   google.script.run
     .withSuccessHandler(function (data) {
       if (!data) { historyStatus.textContent = "تعذّر العثور على التقرير."; return; }
       fillForm(data);
-      historyStatus.textContent = "تم تحميل التقرير " + id;
+      setMode(row);
+      historyStatus.textContent = "تم تحميل التقرير " + (data.incidentId || "رقم الصف " + row);
     })
     .withFailureHandler(function (e) {
       historyStatus.textContent = "خطأ: " + e.message;
     })
-    .getReport(id);
+    .getReport(row);
 });
 
 document.getElementById("newReportBtn").addEventListener("click", function () {
   reportSelect.value = "";
+  setMode(0);
   clearForm();
   historyStatus.textContent = "";
 });
 
+setMode(0);
 refreshReportList(false);
 
 /* ------------------------------ Save / Generate ------------------------------ */
 
 document.getElementById("resetBtn").addEventListener("click", clearForm);
 
-document.getElementById("saveBtn").addEventListener("click", function () {
+document.getElementById("saveBtn").addEventListener("click", async function () {
   const status = document.getElementById("status");
   const data = collectFormData();
   if (!data.title || !data.department || !data.incidentDate || !data.reporterName || !data.description){
@@ -551,22 +651,36 @@ document.getElementById("saveBtn").addEventListener("click", function () {
   const btn = document.getElementById("saveBtn");
   btn.disabled = true;
   status.className = "status info";
-  status.textContent = "جارٍ الحفظ...";
+  status.textContent = "جارٍ تجهيز المرفقات والحفظ...";
+
+  let files;
+  try {
+    files = await readFilesAsBase64(attachInput.files);
+  } catch (err) {
+    btn.disabled = false;
+    status.className = "status err";
+    status.textContent = "تعذّر قراءة المرفقات: " + err.message;
+    return;
+  }
+
   google.script.run
     .withSuccessHandler(function (result) {
       btn.disabled = false;
       setVal("incidentId", result.id);
       status.className = "status ok";
-      status.textContent = "تم الحفظ في النظام برقم " + result.id + ".";
+      status.textContent = (currentRow ? "تم تحديث التقرير رقم " : "تم الحفظ في النظام برقم ") + result.id + ".";
+      setMode(result.row);
+      clearPendingFiles();
+      if (result.attachmentNames) renderExistingAttachments(result.attachmentNames, result.attachmentLinks);
       refreshReportList(true);
-      reportSelect.value = result.id;
+      reportSelect.value = result.row;
     })
     .withFailureHandler(function (e) {
       btn.disabled = false;
       status.className = "status err";
       status.textContent = "تعذّر الحفظ: " + e.message;
     })
-    .saveReport(data);
+    .saveReport(data, files, currentRow);
 });
 
 document.getElementById("incidentForm").addEventListener("submit", async (e) => {
