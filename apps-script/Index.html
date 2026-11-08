@@ -118,7 +118,8 @@
 <header class="topbar"><div class="container">
   <span class="title"><?= appName ?></span>
   <a class="navlink" href="<?= baseUrl ?>?page=reports" target="_top">كل التقارير</a>
-  <span class="user" title="مسجّل الدخول بحساب الجامعة"><?= userEmail ?></span>
+  <? if (role === 'admin') { ?><a class="navlink" href="<?= baseUrl ?>?page=users" target="_top">إدارة المستخدمين</a><? } ?>
+  <span class="user" title="مسجّل الدخول بحساب الجامعة"><?= userEmail ?> · <?= role ?></span>
 </div></header>
 <div class="diag"></div>
 
@@ -293,6 +294,9 @@
 
 <?!= include('Logos') ?>
 <script>
+  const USER_ROLE = '<?= role ?>';
+  const CAN_EDIT = USER_ROLE !== 'viewer';
+  document.addEventListener('DOMContentLoaded', function(){ if(!CAN_EDIT){ var b=document.getElementById('saveBtn'); if(b){b.disabled=true;b.style.display='none';} var n=document.createElement('div'); n.style.cssText='background:#fff4d6;border:1px solid #e6c458;padding:8px 14px;margin:10px 0;border-radius:4px;font-weight:700'; n.textContent='صلاحيتك: مطّلع — يمكنك مراجعة التقارير وطباعتها وتصديرها دون حفظ أو تعديل.'; var m=document.querySelector('main')||document.body; m.insertBefore(n,m.firstChild);} });
 [].forEach.call(document.querySelectorAll("img[data-logo]"), function (img) {
   img.src = ITOC_LOGOS[img.getAttribute("data-logo")] || "";
 });

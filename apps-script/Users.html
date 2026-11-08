@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="<?= version ?>">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--purple:#501e8c;--purple-dark:#3a1464;--blue:#0a6eaa;--bg:#f7f5fb;--ink:#241436;--muted:#6b5a80;--border:rgba(80,30,140,.18);--radius:4px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Cairo",Tahoma,Arial,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  .container{max-width:1000px;margin:0 auto;padding:0 20px}
+  .topbar{background:var(--purple-dark);color:#fff}
+  .topbar .container{display:flex;align-items:center;gap:12px;padding-top:12px;padding-bottom:12px}
+  .title{font-weight:800}
+  .navlink{color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border:1px solid rgba(255,255,255,.4);padding:3px 12px;border-radius:3px}
+  .user{font-size:.8rem;color:#e6dcf5;direction:ltr;margin-inline-start:auto}
+  .diag{height:5px;background:var(--blue)}
+  main{padding:22px 0 48px}
+  .card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  h2{margin:0 0 12px;font-size:1.05rem;color:#000}
+  .grid{display:grid;grid-template-columns:2fr 1.4fr 1fr 2fr auto;gap:10px;align-items:end}
+  label{font-size:.8rem;color:var(--muted);font-weight:700;display:block;margin-bottom:3px}
+  input,select{font:inherit;padding:8px 10px;border:1px solid #cdbfe3;border-radius:var(--radius);width:100%;background:#fff}
+  input.ltr{direction:ltr;text-align:left}
+  button{font:inherit;font-weight:700;padding:8px 16px;border-radius:var(--radius);border:1px solid var(--purple);background:var(--purple);color:#fff;cursor:pointer}
+  button.alt{background:#fff;color:var(--purple)} button.danger{background:#fff;color:#b3261e;border-color:#b3261e}
+  button:disabled{opacity:.5;cursor:default}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{border-bottom:1px solid #eee;padding:8px;text-align:start;vertical-align:middle}
+  th{background:#f0ebf8;color:#000}
+  td.em{direction:ltr;text-align:left;font-family:Arial,sans-serif}
+  .badge{display:inline-block;padding:1px 10px;border-radius:10px;font-size:.78rem;font-weight:700;background:#eee}
+  .b-admin{background:#e9dcfa;color:#3a1464}.b-editor{background:#dff1e4;color:#1b6b34}.b-viewer{background:#e6f3fa;color:#0a5a8a}.b-off{background:#fde4e2;color:#b3261e}
+  #msg{margin-bottom:12px;font-weight:700}.ok{color:#1b6b34}.err{color:#b3261e}
+  .roles{font-size:.82rem;color:var(--muted);line-height:1.9;margin:0;padding-inline-start:18px}
+  @media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="container">
+  <span class="title"><?= appName ?> — إدارة المستخدمين</span>
+  <a class="navlink" href="<?= baseUrl ?>" target="_top">تقرير جديد</a>
+  <a class="navlink" href="<?= baseUrl ?>?page=reports" target="_top">كل التقارير</a>
+  <span class="user"><?= userEmail ?></span>
+</div></header>
+<div class="diag"></div>
+<main><div class="container">
+  <div id="msg"></div>
+  <div class="card">
+    <h2 id="formTitle">إضافة مستخدم</h2>
+    <div class="grid">
+      <div><label>البريد الجامعي</label><input id="fEmail" class="ltr" placeholder="name@sr.edu.sa"></div>
+      <div><label>الاسم</label><input id="fName"></div>
+      <div><label>الدور (Role)</label>
+        <select id="fRole"><option value="viewer">مطّلع</option><option value="editor" selected>محرّر</option><option value="admin">مدير النظام</option></select></div>
+      <div><label>ملاحظات</label><input id="fNotes"></div>
+      <div><button id="saveBtn">حفظ</button> <button id="cancelBtn" class="alt" style="display:none">إلغاء</button></div>
+    </div>
+    <ul class="roles" style="margin-top:12px">
+      <li><b>مدير النظام (admin):</b> كل الصلاحيات + إدارة المستخدمين.</li>
+      <li><b>محرّر (editor):</b> إنشاء التقارير وتعديلها وحفظها وطباعتها.</li>
+      <li><b>مطّلع (viewer):</b> مراجعة التقارير وطباعتها وتصديرها فقط، بلا حفظ أو تعديل.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>المستخدمون <span id="cnt" class="badge"></span></h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>البريد</th><th>الاسم</th><th>الدور</th><th>الحالة</th><th>ملاحظات</th><th></th></tr></thead>
+      <tbody id="tb"><tr><td colspan="6">جارٍ التحميل…</td></tr></tbody>
+    </table></div>
+  </div>
+</div></main>
+<script>
+  const ME = '<?= userEmail ?>'.toLowerCase();
+  const ROLE_AR = {admin:'مدير النظام', editor:'محرّر', viewer:'مطّلع'};
+  let USERS = [];
+  const $ = id => document.getElementById(id);
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+  function msg(t, ok){const m=$('msg'); m.textContent=t||''; m.className=ok?'ok':'err';}
+  function render(){
+    $('cnt').textContent = USERS.length;
+    $('tb').innerHTML = USERS.map((u,i)=>
+      '<tr><td class="em">'+esc(u.email)+'</td><td>'+esc(u.name)+'</td>'+
+      '<td><span class="badge b-'+u.role+'">'+ROLE_AR[u.role]+'</span></td>'+
+      '<td>'+(u.active?'<span class="badge b-editor">مفعّل</span>':'<span class="badge b-off">موقوف</span>')+'</td>'+
+      '<td>'+esc(u.notes)+'</td><td style="white-space:nowrap">'+
+      '<button class="alt" data-a="edit" data-i="'+i+'">تعديل</button> '+
+      (u.owner||u.email===ME?'':'<button class="alt" data-a="toggle" data-i="'+i+'">'+(u.active?'إيقاف':'تفعيل')+'</button> <button class="danger" data-a="del" data-i="'+i+'">حذف</button>')+
+      '</td></tr>').join('') || '<tr><td colspan="6">لا يوجد مستخدمون</td></tr>';
+  }
+  function load(){
+    google.script.run.withSuccessHandler(r=>{USERS=r;render();}).withFailureHandler(e=>msg(e.message)).listUsers();
+  }
+  function busy(b){document.querySelectorAll('button').forEach(x=>x.disabled=b);}
+  function save(u, okText){
+    busy(true); msg('جارٍ الحفظ…', true);
+    google.script.run.withSuccessHandler(r=>{USERS=r;render();busy(false);msg(okText,true);resetForm();})
+      .withFailureHandler(e=>{busy(false);msg(e.message);}).saveUser(u);
+  }
+  function resetForm(){$('fEmail').value='';$('fName').value='';$('fNotes').value='';$('fRole').value='editor';$('fEmail').readOnly=false;$('formTitle').textContent='إضافة مستخدم';$('cancelBtn').style.display='none';}
+  $('cancelBtn').onclick=resetForm;
+  $('saveBtn').onclick=function(){
+    const email=$('fEmail').value.trim().toLowerCase();
+    if(!email){msg('أدخل البريد الجامعي');return;}
+    const old=USERS.find(u=>u.email===email);
+    save({email, name:$('fName').value, role:$('fRole').value, notes:$('fNotes').value, active: old?old.active:true}, 'تم الحفظ');
+  };
+  $('tb').onclick=function(e){
+    const b=e.target.closest('button'); if(!b) return;
+    const u=USERS[+b.dataset.i];
+    if(b.dataset.a==='edit'){
+      $('fEmail').value=u.email;$('fEmail').readOnly=true;$('fName').value=u.name;$('fRole').value=u.role;$('fNotes').value=u.notes;
+      $('formTitle').textContent='تعديل: '+u.email;$('cancelBtn').style.display='';window.scrollTo(0,0);
+    } else if(b.dataset.a==='toggle'){
+      save({email:u.email,name:u.name,role:u.role,notes:u.notes,active:!u.active}, u.active?'تم إيقاف المستخدم':'تم تفعيل المستخدم');
+    } else if(b.dataset.a==='del'){
+      if(!confirm('حذف '+u.email+' نهائيًا من القائمة؟')) return;
+      busy(true);
+      google.script.run.withSuccessHandler(r=>{USERS=r;render();busy(false);msg('تم الحذف',true);})
+        .withFailureHandler(e=>{busy(false);msg(e.message);}).deleteUser(u.email);
+    }
+  };
+  load();
+</script>
+</body>
+</html>

@@ -70,6 +70,7 @@
 <header class="topbar"><div class="container">
   <span class="title">سجل تقارير الحوادث — كل التقارير</span>
   <a class="navlink" href="<?= baseUrl ?>" target="_top">تقرير جديد / تعديل</a>
+  <? if (role === 'admin') { ?><a class="navlink" href="<?= baseUrl ?>?page=users" target="_top">إدارة المستخدمين</a><? } ?>
   <span class="user"><?= userEmail ?></span>
 </div></header>
 <div class="diag"></div>

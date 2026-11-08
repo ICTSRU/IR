@@ -20,7 +20,7 @@
 /* ▼▼▼ CONFIG ▼▼▼ */
 const APP_NAME       = 'نموذج تقرير حادثة تقنية معلومات';
 const APP_NAME_EN    = 'IT Incident Report';
-const APP_VERSION    = '3.8';
+const APP_VERSION    = '3.9';
 const ALLOWED_DOMAIN = 'sr.edu.sa';
 const FAVICON_URL    = 'https://ictsru.github.io/IR/assets/itoc-logo.png';
 
@@ -114,7 +114,14 @@ function doGet(e) {
   logAccess_(email, 'granted');
 
   const page = (e && e.parameter && e.parameter.page) || '';
-  const t = HtmlService.createTemplateFromFile(page === 'reports' ? 'Reports' : 'Index');
+  const role = roleOf_(email);
+  if (page === 'users' && role !== 'admin') {
+    const d = HtmlService.createTemplateFromFile('Denied');
+    d.appName = APP_NAME; d.appNameEn = APP_NAME_EN; d.userEmail = email; d.reason = 'role';
+    return d.evaluate().setTitle(APP_NAME + ' | غير مصرح');
+  }
+  const t = HtmlService.createTemplateFromFile(page === 'reports' ? 'Reports' : page === 'users' ? 'Users' : 'Index');
+  t.role      = role;
   t.baseUrl   = ScriptApp.getService().getUrl();
   t.appName   = APP_NAME;
   t.appNameEn = APP_NAME_EN;
@@ -136,7 +143,7 @@ function doGet(e) {
  * يعيد {ok, id, row}.
  */
 function saveReport(data, files, rowNumber) {
-  const email = requireSruUser_();
+  const email = requireRole_(['admin', 'editor']);
   data = data || {};
   files = files || [];
   rowNumber = Number(rowNumber) || 0;
@@ -570,6 +577,128 @@ function accessStatus_(email) {
   return allowedEmails_().indexOf(email) !== -1 ? 'ok' : 'list';
 }
 
+/* ------------------------------ Roles ------------------------------- */
+const ROLES = ['admin', 'editor', 'viewer'];
+const ROLE_LABELS = { admin: 'مدير النظام', editor: 'محرّر', viewer: 'مطّلع' };
+
+function normRole_(r) {
+  r = String(r || '').trim().toLowerCase();
+  if (ROLES.indexOf(r) !== -1) return r;
+  return 'editor'; // قيم قديمة مثل user / owner
+}
+function isOwner_(email) {
+  return OWNER_EMAILS.map(e => e.toLowerCase()).indexOf(String(email).toLowerCase()) !== -1;
+}
+function roleMap_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('acl_roles_v1');
+  if (hit) return JSON.parse(hit);
+  const map = {};
+  try {
+    const sh = accessSheet_(false);
+    if (sh && sh.getLastRow() > 1) {
+      sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().forEach(r => {
+        const e = String(r[0]).trim().toLowerCase();
+        if (e && r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE') map[e] = normRole_(r[2]);
+      });
+    }
+  } catch (err) { console.error('roleMap_ failed: ' + err); }
+  cache.put('acl_roles_v1', JSON.stringify(map), ACCESS_CACHE_SECONDS);
+  return map;
+}
+function roleOf_(email) {
+  email = String(email || '').toLowerCase();
+  if (isOwner_(email)) return 'admin';
+  if (ACCESS_MODE !== 'LIST') return 'editor';
+  return roleMap_()[email] || 'viewer';
+}
+function requireRole_(roles) {
+  const email = requireSruUser_();
+  if (roles.indexOf(roleOf_(email)) === -1) throw new Error('غير مصرح — صلاحيتك لا تسمح بهذا الإجراء');
+  return email;
+}
+function clearAccessCache_() {
+  const c = CacheService.getScriptCache();
+  c.remove('acl_v1'); c.remove('acl_roles_v1');
+}
+
+/* ---------------------- لوحة المستخدمين (admin) ---------------------- */
+
+function listUsers() {
+  requireRole_(['admin']);
+  const sh = accessSheet_(true);
+  const out = [];
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().forEach(r => {
+      const e = String(r[0]).trim().toLowerCase();
+      if (!e) return;
+      out.push({ email: e, name: String(r[1] || ''), role: isOwner_(e) ? 'admin' : normRole_(r[2]),
+        active: r[3] === true || String(r[3]).toUpperCase() === 'TRUE', notes: String(r[4] || ''), owner: isOwner_(e) });
+    });
+  }
+  OWNER_EMAILS.forEach(o => {
+    if (!out.some(u => u.email === o.toLowerCase()))
+      out.unshift({ email: o.toLowerCase(), name: '', role: 'admin', active: true, notes: 'owner (من الكود)', owner: true });
+  });
+  return out;
+}
+
+function saveUser(u) {
+  const me = requireRole_(['admin']);
+  u = u || {};
+  const email = String(u.email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('بريد إلكتروني غير صالح');
+  if (!isAllowed_(email)) throw new Error('يجب أن يكون البريد ضمن نطاق @' + ALLOWED_DOMAIN);
+  const role = normRole_(u.role);
+  if (ROLES.indexOf(String(u.role)) === -1) throw new Error('دور غير صالح');
+  const active = u.active !== false;
+  if (isOwner_(email) && (role !== 'admin' || !active)) throw new Error('لا يمكن تغيير صلاحية مالك النظام');
+  if (email === me && (role !== 'admin' || !active)) throw new Error('لا يمكنك إنزال صلاحيتك أو إيقاف حسابك');
+
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sh = accessSheet_(true);
+    const n = Math.max(sh.getLastRow() - 1, 0);
+    const emails = n ? sh.getRange(2, 1, n, 1).getValues().map(r => String(r[0]).trim().toLowerCase()) : [];
+    let idx = emails.indexOf(email);
+    const row = [email, String(u.name || '').trim(), role, active, String(u.notes || '').trim()];
+    let created = false;
+    if (idx === -1) {
+      let target = emails.indexOf('');
+      target = target === -1 ? n + 2 : target + 2;
+      sh.getRange(target, 4).insertCheckboxes();
+      sh.getRange(target, 1, 1, 5).setValues([row]);
+      created = true;
+    } else {
+      sh.getRange(idx + 2, 4).insertCheckboxes();
+      sh.getRange(idx + 2, 1, 1, 5).setValues([row]);
+    }
+    SpreadsheetApp.flush();
+    clearAccessCache_();
+    logAccess_(me, (created ? 'user-added:' : 'user-updated:') + email + ':' + role + (active ? '' : ':inactive'));
+  } finally { lock.releaseLock(); }
+  return listUsers();
+}
+
+function deleteUser(email) {
+  const me = requireRole_(['admin']);
+  email = String(email || '').trim().toLowerCase();
+  if (isOwner_(email)) throw new Error('لا يمكن حذف مالك النظام');
+  if (email === me) throw new Error('لا يمكنك حذف حسابك');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const sh = accessSheet_(true);
+    const n = Math.max(sh.getLastRow() - 1, 0);
+    const emails = n ? sh.getRange(2, 1, n, 1).getValues().map(r => String(r[0]).trim().toLowerCase()) : [];
+    const idx = emails.indexOf(email);
+    if (idx !== -1) sh.getRange(idx + 2, 1, 1, 5).clearContent();
+    SpreadsheetApp.flush();
+    clearAccessCache_();
+    logAccess_(me, 'user-deleted:' + email);
+  } finally { lock.releaseLock(); }
+  return listUsers();
+}
+
 function allowedEmails_() {
   const cache = CacheService.getScriptCache();
   const hit = cache.get('acl_v1');
@@ -599,7 +728,7 @@ function accessSheet_(create) {
     [260, 200, 100, 70, 260].forEach((w, i) => sh.setColumnWidth(i + 1, w));
     sh.getRange(2, 4, 300, 1).insertCheckboxes();
     sh.getRange('A1').setNote('البريد الجامعي كاملًا — name@sr.edu.sa');
-    sh.getRange('C1').setNote('admin / user (للتوثيق — يمكن استخدامه لاحقًا لصلاحيات أدق)');
+    sh.getRange('C1').setNote('admin = مدير | editor = محرّر (يكتب ويعدّل) | viewer = مطّلع (قراءة وطباعة فقط)');
     sh.getRange('D1').setNote('ألغِ العلامة لإيقاف الوصول دون حذف الصف');
   }
   return sh;
@@ -620,7 +749,7 @@ function setupAccessList() {
   seed.forEach(r => {
     const e = String(r[0]).trim().toLowerCase();
     if (e && have.indexOf(e) === -1) {
-      kept.push([e, r[1] || '', r[2] || 'user', true, r[3] || 'added by setupAccessList']);
+      kept.push([e, r[1] || '', r[2] || 'editor', true, r[3] || 'added by setupAccessList']);
       have.push(e); added++;
     }
   });
@@ -630,7 +759,7 @@ function setupAccessList() {
   sh.getRange(2, 4, rows, 1).insertCheckboxes();
   if (kept.length) sh.getRange(2, 1, kept.length, 5).setValues(kept);
 
-  CacheService.getScriptCache().remove('acl_v1');
+  clearAccessCache_();
   console.log('AllowedUsers ready: ' + kept.length + ' entries (' + added + ' added).');
   try { SpreadsheetApp.getActive().toast('قائمة المصرّح لهم جاهزة: ' + kept.length + ' بريدًا (أُضيف ' + added + ').', SHEET_ACCESS, 8); } catch (e) {}
 }
