@@ -20,7 +20,7 @@
 /* ▼▼▼ CONFIG ▼▼▼ */
 const APP_NAME       = 'نموذج تقرير حادثة تقنية معلومات';
 const APP_NAME_EN    = 'IT Incident Report';
-const APP_VERSION    = '3.0';
+const APP_VERSION    = '3.8';
 const ALLOWED_DOMAIN = 'sr.edu.sa';
 const FAVICON_URL    = 'https://ictsru.github.io/IR/assets/itoc-logo.png';
 
@@ -58,7 +58,7 @@ const ACCESS_CACHE_SECONDS = 120;
 /* ------------------------- التقارير (البيانات الفعلية) ------------------------- */
 // نفس الجدول ونفس الورقة الموجودة فعليًا — لا يُنشئ أي منهما إن كانا موجودين
 const REPORTS_SPREADSHEET_ID = '1NCehfLQXMEzvgSKB8A2Oebtna_zVYwwZvsSFg3sUrmk';
-const SHEET_REPORTS = 'Form responses 1';
+const SHEET_REPORTS = 'Untitled';
 const REPORTS_MAX_LIST = 500;
 const FORM_VERSION = '1.7'; // استمرارًا لتسلسل "إصدار النموذج" الحالي في البيانات (آخر قيمة كانت 1.6)
 
@@ -93,12 +93,13 @@ const REPORT_COLS = [
   'approvedBy',          // روجع / اعتمد بواسطة
   'attachmentCount',     // عدد المرفقات
   'attachmentNames',     // أسماء المرفقات
-  'formVersion'          // إصدار النموذج
+  'formVersion',         // إصدار النموذج
+  'extraSections'        // مقاطع إضافية (JSON: [{title, content}]) — عمود يُضاف تلقائيًا
 ];
 
 /* ----------------------------- Web app ------------------------------ */
 
-function doGet() {
+function doGet(e) {
   const email = currentEmail_();
   const status = accessStatus_(email);
   if (status !== 'ok') {
@@ -112,7 +113,9 @@ function doGet() {
   }
   logAccess_(email, 'granted');
 
-  const t = HtmlService.createTemplateFromFile('Index');
+  const page = (e && e.parameter && e.parameter.page) || '';
+  const t = HtmlService.createTemplateFromFile(page === 'reports' ? 'Reports' : 'Index');
+  t.baseUrl   = ScriptApp.getService().getUrl();
   t.appName   = APP_NAME;
   t.appNameEn = APP_NAME_EN;
   t.version   = APP_VERSION;
@@ -170,7 +173,8 @@ function saveReport(data, files, rowNumber) {
     incidentId: incidentId,
     attachmentCount: attachmentCount,
     attachmentNames: attachmentNames,
-    formVersion: FORM_VERSION
+    formVersion: FORM_VERSION,
+    extraSections: JSON.stringify(cleanExtra_(data.extraSections))
   });
   const row = REPORT_COLS.map(key => rowObj[key] !== undefined ? rowObj[key] : '');
 
@@ -220,6 +224,29 @@ function listReports() {
   return items.slice(0, REPORTS_MAX_LIST);
 }
 
+/** يعيد كل التقارير كاملة (الأحدث أولًا) لصفحة الاطلاع والطباعة. */
+function listAllReports() {
+  requireSruUser_();
+  const sh = reportsSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const values = sh.getRange(2, 1, last - 1, REPORT_COLS.length).getValues();
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const r = values[i];
+    if (!r[REPORT_COLS.indexOf('title')]) continue;
+    const obj = { row: i + 2 };
+    REPORT_COLS.forEach((key, idx) => {
+      let v = r[idx];
+      if (v instanceof Date) v = key === 'timestamp' ? Utilities.formatDate(v, LOG_TIMEZONE, 'yyyy-MM-dd HH:mm') : formatMaybeDate_(v);
+      obj[key] = (v === null || v === undefined) ? '' : String(v);
+    });
+    out.push(obj);
+  }
+  out.reverse();
+  return out.slice(0, REPORTS_MAX_LIST);
+}
+
 /** يعيد بيانات تقرير كاملة برقم صفه في الورقة. */
 function getReport(rowNumber) {
   requireSruUser_();
@@ -241,24 +268,178 @@ function getReport(rowNumber) {
   const namesRaw = String(obj.attachmentNames || '');
   obj.attachmentNames = namesRaw ? namesRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-  // محاولة إيجاد مجلد المرفقات (إن وُجد) لعرض روابط التنزيل، مرتّبة لتطابق attachmentNames
-  obj.attachmentLinks = [];
+  obj.extraSections = parseExtra_(obj.extraSections);
+
+  // روابط Drive لملفات المرفقات (مرتّبة لتطابق attachmentNames)
+  obj.attachmentLinks = obj.attachmentNames.map(() => '');
   try {
-    if (obj.incidentId) {
-      const folder = findIncidentFolder_(obj.incidentId);
-      if (folder) {
-        const byName = {};
-        const it = folder.getFiles();
-        while (it.hasNext()) {
-          const f = it.next();
-          byName[f.getName()] = f.getUrl();
-        }
-        obj.attachmentLinks = obj.attachmentNames.map(n => byName[n] || '');
-      }
+    if (obj.attachmentNames.length) {
+      const byName = {};
+      findAttachmentFiles_(obj.incidentId, obj.attachmentNames).forEach(f => { byName[f.getName()] = f.getUrl(); });
+      obj.attachmentLinks = obj.attachmentNames.map(n => byName[n] || '');
     }
   } catch (e) { /* تجاهل أي خطأ في البحث عن المرفقات */ }
 
   return obj;
+}
+
+/* ------------------------- صور المرفقات والشعارات ------------------------- */
+
+/** ملفات مرفقات تقرير: من مجلد الحادثة، وإلا بالبحث عن الأسماء داخل المجلد الجذري (للتقارير القديمة). */
+function findAttachmentFiles_(incidentId, names) {
+  const files = [];
+  try {
+    const root = getOrCreateRootAttachmentsFolder_();
+    const folder = incidentId ? findIncidentFolder_(incidentId, root) : null;
+    if (folder) {
+      const it = folder.getFiles();
+      while (it.hasNext()) files.push(it.next());
+      return files;
+    }
+    names = (names || []).filter(Boolean);
+    if (!names.length) return files;
+    const found = {};
+    names.forEach(nm => { const it = root.getFilesByName(nm); if (it.hasNext()) found[nm] = it.next(); });
+    const folders = root.getFolders();
+    let n = 0;
+    while (folders.hasNext() && n < 500) {
+      const f = folders.next(); n++;
+      names.forEach(nm => {
+        if (found[nm]) return;
+        const it = f.getFilesByName(nm);
+        if (it.hasNext()) found[nm] = it.next();
+      });
+      if (names.every(nm => found[nm])) break;
+    }
+    names.forEach(nm => { if (found[nm]) files.push(found[nm]); });
+  } catch (e) { console.error('findAttachmentFiles_: ' + e); }
+  return files;
+}
+
+function namesList_(v) {
+  if (Array.isArray(v)) return v.map(s => String(s).trim()).filter(Boolean);
+  return String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+/** مرفقات تقرير محفوظ (صور بمحتواها + روابط Drive) للعرض داخل الصفحة والمستندات. */
+function getAttachmentImages(rowNumber) {
+  requireSruUser_();
+  const r = getReport(Number(rowNumber));
+  if (!r) return [];
+  return getAttachmentImages_(r.incidentId, 10, r.attachmentNames);
+}
+
+function getAttachmentImages_(incidentId, maxCount, names) {
+  const out = [];
+  try {
+    const files = findAttachmentFiles_(incidentId, namesList_(names));
+    for (let i = 0; i < files.length && out.length < (maxCount || 10); i++) {
+      const f = files[i];
+      const mime = f.getMimeType() || '';
+      if (mime.indexOf('image/') !== 0) continue;
+      let blob;
+      if (f.getSize() > 2500000) {
+        blob = f.getThumbnail(); // الصور الكبيرة: نسخة مصغّرة لتفادي تضخّم الملف
+        if (!blob) continue;
+      } else {
+        blob = f.getBlob();
+      }
+      out.push({ name: f.getName(), mime: blob.getContentType() || mime, base64: Utilities.base64Encode(blob.getBytes()), url: f.getUrl() });
+    }
+  } catch (e) { console.error('getAttachmentImages_: ' + e); }
+  return out;
+}
+
+/** شعارات SRU و ICTD (data URI) من Logos.html. */
+function getLogos_() {
+  const res = {};
+  try {
+    const txt = HtmlService.createHtmlOutputFromFile('Logos').getContent();
+    const re = /(sru|ictd)\s*:\s*"(data:image\/[a-z]+;base64,[^"]+)"/g;
+    let m;
+    while ((m = re.exec(txt)) !== null) res[m[1]] = m[2];
+  } catch (e) { console.error('getLogos_: ' + e); }
+  return res;
+}
+
+/* ------------------------- تصدير PDF من الخادم ------------------------- */
+
+/** يعيد PDF (base64) لتقرير واحد (rowNumber) أو لكل التقارير (rowNumber = 0). */
+function exportReportsPdf(rowNumber) {
+  requireSruUser_();
+  rowNumber = Number(rowNumber) || 0;
+  let items;
+  if (rowNumber > 0) {
+    const r = getReport(rowNumber);
+    items = r ? [r] : [];
+  } else {
+    items = listAllReports();
+  }
+  if (!items.length) throw new Error('لا توجد تقارير للتصدير.');
+  const perReport = rowNumber > 0 ? 10 : 3;
+  items.forEach(d => { d._images = getAttachmentImages_(d.incidentId, perReport, d.attachmentNames); });
+  const html = buildPdfHtml_(items);
+  const blob = Utilities.newBlob(html, 'text/html', 'report.html').getAs('application/pdf');
+  const name = rowNumber > 0
+    ? 'تقرير_حادثة_' + (items[0].incidentId || ('صف' + rowNumber)) + '.pdf'
+    : 'سجل_تقارير_الحوادث.pdf';
+  return { name: name, base64: Utilities.base64Encode(blob.getBytes()) };
+}
+
+function arNum_(n) {
+  return String(n).replace(/[0-9]/g, d => '٠١٢٣٤٥٦٧٨٩'.charAt(Number(d)));
+}
+
+function pdfEsc_(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/\n/g, '<br>');
+}
+
+function buildPdfHtml_(items) {
+  const LOGO = getLogos_();
+  const TH = 'width:28%;background:#f0ebf8;color:#000000;border:1px solid #bfb2d6;padding:5px 9px;text-align:right;font-weight:bold;';
+  const TD = 'border:1px solid #bfb2d6;padding:5px 9px;text-align:right;color:#000000;';
+  const H2 = 'color:#000000;font-weight:bold;font-size:13pt;border-bottom:2px solid #000000;padding:2px 0 3px;margin:14px 0 6px;text-align:right;';
+  const BOX = 'border:1px solid #bfb2d6;padding:8px 10px;text-align:right;line-height:1.7;color:#000000;';
+  const row = (l, v) => '<tr><td style="' + TH + '">' + l + '</td><td style="' + TD + '">' + (pdfEsc_(v) || '—') + '</td></tr>';
+  const tbl = rows => '<table style="width:100%;border-collapse:collapse;" dir="rtl">' + rows + '</table>';
+  const sec = (t, n) => '<div style="' + H2 + '">' + n + ' — ' + t + '</div>';
+  const box = t => '<div style="' + BOX + '">' + (pdfEsc_(t) || '—') + '</div>';
+  const SEV = { 'حرجة': '#8a1f1f', 'عالية': '#8a4b10', 'متوسطة': '#3a1464', 'منخفضة': '#1f6b37' };
+  const gen = Utilities.formatDate(new Date(), LOG_TIMEZONE, 'dd/MM/yyyy');
+  const logoImg = (k, h) => LOGO[k] ? '<img src="' + LOGO[k] + '" height="' + h + '">' : '';
+
+  const pages = items.map((d, i) => {
+    const names = Array.isArray(d.attachmentNames) ? d.attachmentNames : String(d.attachmentNames || '').split(',').map(s => s.trim()).filter(Boolean);
+    const extras = parseExtra_(d.extraSections);
+    const imgs = (d._images || []).map(im =>
+      '<div style="margin:10px 0;text-align:center;"><div style="font-weight:bold;text-align:right;color:#000000;font-size:9.5pt;margin-bottom:3px;">' + pdfEsc_(im.name) + '</div>' +
+      '<img src="data:' + im.mime + ';base64,' + im.base64 + '" style="max-width:520px;max-height:640px;border:1px solid #bfb2d6;"></div>').join('');
+    const attBlock = (names.length || imgs) ? (names.length ? tbl(names.map((n, k) => row('مرفق ' + (k + 1), n)).join('')) : '') + imgs : box('');
+    return '<div dir="rtl" style="' + (i < items.length - 1 ? 'page-break-after:always;' : '') + '">' +
+      '<table style="width:100%;border-bottom:2px solid #501e8c;" dir="rtl"><tr>' +
+        '<td style="text-align:right;">' + logoImg('sru', 44) + '</td>' +
+        '<td style="text-align:left;" dir="ltr">' + logoImg('ictd', 48) + '</td></tr></table>' +
+      '<div style="border-top:3px solid #501e8c;border-bottom:3px solid #501e8c;padding:10px 4px;margin-top:8px;text-align:right;">' +
+        '<div style="font-size:19pt;font-weight:bold;color:#000000;">تقرير حادثة تقنية معلومات</div>' +
+        '<div style="font-size:11.5pt;font-weight:bold;color:#222222;">' + pdfEsc_(d.title || 'حادثة بدون عنوان') + '</div>' +
+        '<div style="font-size:9.5pt;margin-top:6px;font-weight:bold;color:#000000;">رقم الحادثة: ' + (pdfEsc_(d.incidentId) || '—') + ' &nbsp;|&nbsp; تاريخ الإنشاء: ' + gen + '</div></div>' +
+      '<div style="margin:8px 0;padding:6px 12px;border:1px solid #bfb2d6;font-weight:bold;text-align:right;color:' + (SEV[d.severity] || '#3a1464') + ';">مستوى الخطورة: ' + (pdfEsc_(d.severity) || '—') + '</div>' +
+      sec('بيانات الحادثة', '١') + tbl(row('الإدارة / القسم', d.department) + row('تاريخ الحادثة', d.incidentDate) + row('وقت الحادثة', d.incidentTime) + row('الموقع / النظام المتأثر', d.location) + row('التصنيف', d.category)) +
+      sec('بيانات مقدّم البلاغ', '٢') + tbl(row('مقدّم البلاغ', d.reporterName) + row('المسمى الوظيفي', d.reporterTitle) + row('وسيلة التواصل', d.reporterContact) + row('تاريخ التقرير', d.reportDate)) +
+      sec('وصف الحادثة', '٣') + box(d.description) +
+      sec('الإجراءات الفورية المتخذة', '٤') + box(d.actionsTaken) +
+      sec('السبب الجذري', '٥') + box(d.rootCause) +
+      sec('تقييم الأثر', '٦') + box(d.impact) +
+      sec('التوصيات / الإجراءات التصحيحية', '٧') + box(d.recommendations) +
+      extras.map((s, k) => sec(pdfEsc_(s.title || 'مقطع إضافي'), arNum_(8 + k)) + box(s.content)).join('') +
+      sec('الاعتماد', arNum_(8 + extras.length)) + tbl(row('أُعد بواسطة', d.preparedBy) + row('روجع / اعتمد بواسطة', d.approvedBy)) +
+      sec('المرفقات', arNum_(9 + extras.length)) + attBlock +
+      '<div style="margin-top:10px;border-top:1px solid #bfb2d6;font-size:8pt;color:#444444;text-align:right;">مستند داخلي — سري</div></div>';
+  }).join('');
+
+  return '<html dir="rtl"><head><meta charset="utf-8"></head><body dir="rtl" style="font-family:Arial,Tahoma,sans-serif;font-size:10.5pt;color:#000000;direction:rtl;">' + pages + '</body></html>';
 }
 
 function formatMaybeDate_(v) {
@@ -285,11 +466,44 @@ function generateIncidentId_(sh) {
   return prefix + String(max + 1).padStart(3, '0');
 }
 
-function reportsSheet_() {
-  const ss = SpreadsheetApp.openById(REPORTS_SPREADSHEET_ID);
-  const sh = ss.getSheetByName(SHEET_REPORTS);
-  if (!sh) throw new Error('تعذّر إيجاد الورقة "' + SHEET_REPORTS + '" — تحقق من اسم التبويب في الجدول.');
+function cleanExtra_(v) {
+  if (!Array.isArray(v)) return [];
+  return v.map(s => ({ title: String((s && s.title) || '').trim(), content: String((s && s.content) || '').trim() }))
+          .filter(s => s.title || s.content).slice(0, 20);
+}
+function parseExtra_(v) {
+  if (Array.isArray(v)) return cleanExtra_(v);
+  try { return cleanExtra_(JSON.parse(String(v || '[]'))); } catch (e) { return []; }
+}
+
+/** يتأكد من وجود أعمدة الجدول الحالية (يضيف عمود «مقاطع إضافية» عند أول استخدام دون المساس بالبيانات). */
+function ensureColumns_(sh) {
+  const need = REPORT_COLS.length;
+  if (sh.getMaxColumns() < need) sh.insertColumnsAfter(sh.getMaxColumns(), need - sh.getMaxColumns());
+  const hc = sh.getRange(1, need);
+  if (!String(hc.getValue() || '').trim()) hc.setValue('مقاطع إضافية');
   return sh;
+}
+
+function reportsSheet_() {
+  return ensureColumns_(findReportsSheet_());
+}
+
+function findReportsSheet_() {
+  const ss = SpreadsheetApp.openById(REPORTS_SPREADSHEET_ID);
+  // 1) بالاسم المحدد (إن وُجد)
+  let sh = SHEET_REPORTS ? ss.getSheetByName(SHEET_REPORTS) : null;
+  if (sh) return sh;
+  // 2) بالتعرّف على ترويسة الأعمدة الفعلية (لا يعتمد على اسم التبويب)
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const s = sheets[i];
+    if (s.getLastColumn() < 3 || s.getLastRow() < 1) continue;
+    const head = s.getRange(1, 1, 1, 3).getValues()[0].map(v => String(v).trim());
+    if (head[1] === 'عنوان الحادثة' && head[2] === 'رقم الحادثة المرجعي') return s;
+  }
+  // 3) لا يوجد: لا ننشئ تبويبًا جديدًا حمايةً للبيانات
+  throw new Error('تعذّر إيجاد ورقة التقارير. التبويبات الموجودة: ' + sheets.map(s => '"' + s.getName() + '"').join('، '));
 }
 
 /* ---------------------------- المرفقات (Drive) ---------------------------- */

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="version" content="<?= version ?>">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--purple:#501e8c;--purple-dark:#3a1464;--purple-light:#f0ebf8;--blue:#0a6eaa;--blue-light:#e6f3fa;--bg:#f7f5fb;--ink:#241436;--muted:#6b5a80;--border:rgba(80,30,140,.12);--radius:4px;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Cairo",Tahoma,Arial,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;}
+  .container{max-width:1000px;margin:0 auto;padding:0 20px;width:100%;}
+  .band{background:#fff;border-bottom:1px solid var(--border);}
+  .band .container{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:10px;padding-bottom:10px;}
+  .band img{display:block;height:50px;width:auto;max-width:44vw;object-fit:contain;}.band .ictd{height:56px;}
+  .topbar{background:var(--purple-dark);color:#fff;}
+  .topbar .container{display:flex;align-items:center;gap:12px;padding-top:12px;padding-bottom:12px;}
+  .topbar .title{font-weight:800;font-size:1.05rem;}
+  .navlink{color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border:1px solid rgba(255,255,255,.4);padding:3px 12px;border-radius:3px;margin-inline-start:auto;}
+  .user{font-size:.8rem;color:#e6dcf5;direction:ltr;}
+  .diag{height:5px;background:var(--blue);}
+  main{flex:1;padding:22px 0 48px;}
+  .toolbar{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;}
+  .toolbar input,.toolbar select{font:inherit;padding:8px 10px;border:1px solid #cdbfe3;border-radius:var(--radius);background:#fff;}
+  .toolbar input{flex:1;min-width:200px;}
+  button{font:inherit;font-weight:700;padding:8px 16px;border-radius:var(--radius);border:1px solid var(--purple);background:var(--purple);color:#fff;cursor:pointer;}
+  button.alt{background:#fff;color:var(--purple);}
+  .count{color:var(--muted);font-size:.85rem;}
+  details.rep{background:#fff;border:1px solid var(--border);border-inline-start:5px solid var(--purple);border-radius:var(--radius);margin-bottom:10px;}
+  details.rep[data-sev="حرجة"]{border-inline-start-color:#b3261e}details.rep[data-sev="عالية"]{border-inline-start-color:#d9731a}details.rep[data-sev="منخفضة"]{border-inline-start-color:#2e8b4a}
+  summary{cursor:pointer;padding:12px 16px;display:block;list-style:none;}
+  summary .r1{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+  summary .meta{display:flex;flex-wrap:wrap;gap:4px 22px;font-size:.84rem;color:var(--muted)}summary .meta b{color:var(--ink)}
+  summary::-webkit-details-marker{display:none}
+  summary .t{font-weight:800;flex:1;font-size:1.02rem;line-height:1.5}
+  summary .m{font-size:.82rem;color:var(--muted)}
+  .badge{font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:10px;background:var(--purple-light);color:var(--purple-dark)}
+  .body{padding:4px 16px 16px;border-top:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse;margin:10px 0}
+  th,td{border:1px solid #d9cfec;padding:6px 10px;text-align:right;vertical-align:top}
+  th{width:26%;background:var(--purple-light);color:var(--purple-dark)}
+  td{unicode-bidi:plaintext;white-space:pre-wrap}
+  h3{margin:14px 0 4px;font-size:.95rem;color:var(--purple)}
+  .box{border:1px solid #d9cfec;background:#fbfafd;padding:8px 12px;line-height:1.8;white-space:pre-wrap;unicode-bidi:plaintext}
+  .actions{margin-top:10px;display:flex;gap:8px}
+  .imgs figure{margin:10px 0;text-align:center}.imgs figcaption{font-weight:800;text-align:right;margin-bottom:4px;font-size:.9rem}.imgs img{max-width:100%;max-height:520px;border:1px solid #d9cfec}.imgs .note{color:var(--muted);font-size:.85rem}
+  .status{color:var(--muted);padding:20px;text-align:center}
+  footer{background:var(--purple-dark);color:#e6dcf5;font-size:.8rem}
+  footer .container{display:flex;justify-content:space-between;padding-top:12px;padding-bottom:12px}
+  .printhead{display:none}
+  @media print{
+    @page{size:A4;margin:14mm}
+    body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:10.5pt}
+    .band,.topbar,.diag,.toolbar,footer,.actions,summary .arrow{display:none!important}
+    .printhead{display:block;border-bottom:2px solid var(--purple);padding-bottom:6px;margin-bottom:10px;color:#000}.printhead .ph{display:flex;justify-content:space-between;align-items:center}.printhead img{height:46px}.printhead .pt{font-weight:800;font-size:14pt;margin-top:4px}
+    details.rep{break-inside:auto;page-break-after:always;border:1px solid #d9cfec;margin:0}
+    details.rep:last-of-type{page-break-after:auto}
+    details.rep[hidden]{display:none!important}
+    .imgs figure{break-inside:avoid}.imgs img{max-height:200mm}.imgs figcaption{color:#000}
+    body.one details.rep:not(.printing){display:none!important}
+    summary{background:none;color:#000;border-bottom:2px solid #000;padding:6px 0 8px}summary .t{font-size:14pt;font-weight:800}summary .badge{color:#000;background:none;border:1px solid #000;padding:1px 12px;font-weight:800}summary .meta{color:#000;font-size:10pt;gap:2px 24px}summary .meta b{font-weight:800}h3{color:#000;font-weight:800}th{color:#000}
+    .container{max-width:none;padding:0}
+  }
+</style>
+</head>
+<body>
+<div class="band"><div class="container">
+  <img data-logo="sru" alt="جامعة سليمان الراجحي"><img class="ictd" data-logo="ictd" alt="ICTD">
+</div></div>
+<header class="topbar"><div class="container">
+  <span class="title">سجل تقارير الحوادث — كل التقارير</span>
+  <a class="navlink" href="<?= baseUrl ?>" target="_top">تقرير جديد / تعديل</a>
+  <span class="user"><?= userEmail ?></span>
+</div></header>
+<div class="diag"></div>
+<main><div class="container">
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="بحث في كل الحقول (العنوان، الإدارة، المقدّم، الوصف...)">
+    <select id="sev"><option value="">كل مستويات الخطورة</option><option>حرجة</option><option>عالية</option><option>متوسطة</option><option>منخفضة</option></select>
+    <button id="expand" class="alt" type="button">فتح الكل</button>
+    <button id="printAll" class="alt" type="button">طباعة</button>
+    <button id="pdfAll" type="button">تنزيل PDF (الكل)</button>
+    <button id="csv" class="alt" type="button">تصدير CSV</button>
+    <span class="count" id="count"></span>
+  </div>
+  <div class="printhead"><div class="ph"><img data-logo="sru" alt=""><img data-logo="ictd" alt=""></div><div class="pt">سجل تقارير الحوادث</div></div>
+  <div id="list"><div class="status">جارٍ تحميل التقارير...</div></div>
+</div></main>
+<footer><div class="container"><div>الإصدار <span dir="ltr">v<?= version ?></span></div><div>مركز العمليات التقنية ITOC — ICTD — جامعة سليمان الراجحي © 2026</div></div></footer>
+
+<?!= include('Logos') ?>
+<script>
+[].forEach.call(document.querySelectorAll("img[data-logo]"), function (img) { img.src = ITOC_LOGOS[img.getAttribute("data-logo")] || ""; });
+
+const FIELDS = [
+  ["incidentId","رقم الحادثة"],["department","الإدارة / القسم"],["incidentDate","تاريخ الحادثة"],["incidentTime","وقت الحادثة"],
+  ["location","الموقع / النظام المتأثر"],["category","التصنيف"],["severity","مستوى الخطورة"],["reporterName","مقدّم البلاغ"],
+  ["reporterTitle","المسمى الوظيفي"],["reporterContact","وسيلة التواصل"],["reportDate","تاريخ التقرير"]
+];
+const TEXTS = [["description","وصف الحادثة"],["actionsTaken","الإجراءات الفورية المتخذة"],["rootCause","السبب الجذري"],["impact","تقييم الأثر"],["recommendations","التوصيات / الإجراءات التصحيحية"]];
+const TAIL = [["preparedBy","أُعد بواسطة"],["approvedBy","روجع / اعتمد بواسطة"],["attachmentNames","المرفقات"],["timestamp","تاريخ التسجيل"]];
+let ALL = [];
+const listEl = document.getElementById("list");
+
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function extrasOf(r){ try { const v = JSON.parse(r.extraSections || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function rowTbl(arr, r){ return "<table>" + arr.map(f => "<tr><th>" + f[1] + "</th><td>" + (esc(r[f[0]]) || "—") + "</td></tr>").join("") + "</table>"; }
+
+function render(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const sev = document.getElementById("sev").value;
+  const shown = ALL.filter(r => (!sev || r.severity === sev) && (!q || Object.values(r).join(" ").toLowerCase().indexOf(q) > -1));
+  document.getElementById("count").textContent = shown.length + " من " + ALL.length + " تقرير";
+  if (!shown.length){ listEl.innerHTML = '<div class="status">لا توجد تقارير مطابقة.</div>'; return; }
+  listEl.innerHTML = shown.map(r =>
+    '<details class="rep" data-row="' + r.row + '" data-sev="' + esc(r.severity) + '"><summary>' +
+    '<div class="r1"><span class="t">' + esc(r.title) + '</span><span class="badge">' + esc(r.severity || "—") + '</span></div>' +
+    '<div class="meta"><span><b>رقم الحادثة:</b> ' + esc(r.incidentId || "بدون رقم") + '</span><span><b>التاريخ:</b> ' + esc(r.incidentDate || "—") + '</span><span><b>الإدارة:</b> ' + esc(r.department || "—") + '</span></div></summary>' +
+    '<div class="body">' + rowTbl(FIELDS, r) +
+    TEXTS.map(f => "<h3>" + f[1] + '</h3><div class="box">' + (esc(r[f[0]]) || "—") + "</div>").join("") +
+    extrasOf(r).map(s => "<h3>" + esc(s.title || "مقطع إضافي") + '</h3><div class="box">' + (esc(s.content) || "—") + "</div>").join("") +
+    rowTbl(TAIL, r) + '<div class="imgs"></div>' +
+    '<div class="actions"><button type="button" data-pdf="' + r.row + '">تنزيل PDF</button><button type="button" class="alt" data-print="' + r.row + '">طباعة</button></div></div></details>'
+  ).join("");
+}
+
+const IMG_CACHE = {};
+function loadImages(d){
+  const row = d.getAttribute("data-row"), box = d.querySelector(".imgs");
+  if (!box || box.getAttribute("data-done")) return Promise.resolve();
+  box.setAttribute("data-done", "1");
+  if (IMG_CACHE[row]) { box.innerHTML = IMG_CACHE[row]; return Promise.resolve(); }
+  const rec = ALL.find(x => String(x.row) === row);
+  if (!rec || (!rec.incidentId && !rec.attachmentNames)) return Promise.resolve();
+  box.innerHTML = '<div class="note">جارٍ تحميل صور المرفقات...</div>';
+  return new Promise(function (res) {
+    google.script.run
+      .withSuccessHandler(function (list) {
+        const html = (list || []).map(it => '<figure><figcaption>' + esc(it.name) + '</figcaption><img src="data:' + esc(it.mime) + ';base64,' + it.base64 + '"></figure>').join("");
+        IMG_CACHE[row] = html ? '<h3>صور المرفقات</h3>' + html : "";
+        box.innerHTML = IMG_CACHE[row]; res();
+      })
+      .withFailureHandler(function () { box.innerHTML = ""; res(); })
+      .getAttachmentImages(Number(row));
+  });
+}
+listEl.addEventListener("toggle", function (e) { if (e.target.open) loadImages(e.target); }, true);
+
+async function printNow(single){
+  const targets = single ? [single] : [].slice.call(document.querySelectorAll("details.rep"));
+  const cnt = document.getElementById("count"), prev = cnt.textContent;
+  for (let i = 0; i < targets.length; i++) { cnt.textContent = "تحميل الصور " + (i + 1) + "/" + targets.length + "..."; await loadImages(targets[i]); }
+  cnt.textContent = prev;
+  const open = [].slice.call(document.querySelectorAll("details.rep"));
+  const states = open.map(d => d.open);
+  open.forEach(d => { d.open = true; d.classList.remove("printing"); });
+  document.body.classList.remove("one");
+  if (single){ document.body.classList.add("one"); single.classList.add("printing"); }
+  window.print();
+  setTimeout(() => { document.body.classList.remove("one"); open.forEach((d, i) => { d.open = states[i]; d.classList.remove("printing"); }); }, 500);
+}
+listEl.addEventListener("click", e => {
+  const b = e.target.closest("[data-print]");
+  if (b) printNow(b.closest("details.rep"));
+  const p = e.target.closest("[data-pdf]");
+  if (p) downloadPdf(Number(p.getAttribute("data-pdf")), p);
+});
+function downloadPdf(row, btn){
+  const old = btn.textContent; btn.disabled = true; btn.textContent = "جارٍ التجهيز...";
+  google.script.run
+    .withSuccessHandler(function (f) {
+      btn.disabled = false; btn.textContent = old;
+      const bin = atob(f.base64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+    })
+    .withFailureHandler(function (e) { btn.disabled = false; btn.textContent = old; alert("تعذّر إنشاء PDF: " + e.message); })
+    .exportReportsPdf(row);
+}
+document.getElementById("pdfAll").addEventListener("click", function () { downloadPdf(0, this); });
+document.getElementById("printAll").addEventListener("click", () => printNow(null));
+document.getElementById("expand").addEventListener("click", function () {
+  const ds = [].slice.call(document.querySelectorAll("details.rep"));
+  const allOpen = ds.every(d => d.open);
+  ds.forEach(d => d.open = !allOpen);
+  this.textContent = allOpen ? "فتح الكل" : "طي الكل";
+});
+document.getElementById("q").addEventListener("input", render);
+document.getElementById("sev").addEventListener("change", render);
+
+document.getElementById("csv").addEventListener("click", function () {
+  const cols = [["row","الصف"],["timestamp","الطابع الزمني"],["title","العنوان"]].concat(FIELDS, TEXTS, TAIL.slice(0, 3));
+  const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const lines = [cols.map(c => q(c[1])).join(",")].concat(ALL.map(r => cols.map(c => q(r[c[0]])).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "سجل_تقارير_الحوادث.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+google.script.run
+  .withSuccessHandler(function (items) { ALL = items || []; render(); })
+  .withFailureHandler(function (e) { listEl.innerHTML = '<div class="status">تعذّر تحميل التقارير: ' + esc(e.message) + '</div>'; })
+  .listAllReports();
+</script>
+</body>
+</html>

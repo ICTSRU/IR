@@ -1,0 +1,43 @@
+name: Deploy Apps Script
+
+# Pushes apps-script/ to the Apps Script project and updates the EXISTING
+# web-app deployment (same URL) whenever apps-script/ changes on main.
+on:
+  push:
+    branches: [main]
+    paths: ["apps-script/**", ".clasp.json", ".github/workflows/deploy-apps-script.yml"]
+  workflow_dispatch:
+
+env:
+  DEPLOYMENT_ID: AKfycbyZtbgy1boJwnHxEAIuppL97gtoIJkQdMmIGQ947SLrZeY2IIS4oupr_V_EaxM-JdJH
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install clasp
+        run: npm install -g @google/clasp
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          test -n "$CLASPRC_JSON" || { echo "Missing secret CLASPRC_JSON"; exit 1; }
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+      - name: Keep the project's existing manifest (appsscript.json)
+        run: |
+          if [ ! -f apps-script/appsscript.json ]; then
+            mkdir -p /tmp/pull && cp .clasp.json /tmp/pull/.clasp.json
+            (cd /tmp/pull && sed -i 's#"rootDir": *"apps-script"#"rootDir": "."#' .clasp.json && clasp pull)
+            cp /tmp/pull/appsscript.json apps-script/appsscript.json
+            echo "Manifest used:"; cat apps-script/appsscript.json
+          fi
+      - name: Push files
+        run: clasp push --force
+      - name: Deploy to the existing deployment
+        run: |
+          VER=$(grep -oP "APP_VERSION\s*=\s*'\K[^']+" apps-script/Code.gs | head -1)
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "v${VER} (${GITHUB_SHA::7})"

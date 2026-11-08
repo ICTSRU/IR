@@ -26,6 +26,8 @@
   .topbar .container{display:flex;align-items:center;gap:12px;padding-top:12px;padding-bottom:12px;}
   .topbar .title{font-weight:800;font-size:1.05rem;}
   .user{margin-inline-start:auto;font-size:.8rem;color:#e6dcf5;direction:ltr;}
+  .navlink{color:#fff;text-decoration:none;font-size:.85rem;font-weight:700;border:1px solid rgba(255,255,255,.4);padding:3px 12px;border-radius:3px;margin-inline-start:auto;}
+  .user{margin-inline-start:0!important;}
   .diag{height:5px;background:var(--blue);}
 
   main{flex:1;padding:24px 0 48px;}
@@ -39,6 +41,21 @@
   .mode-badge{font-size:12px;font-weight:700;padding:5px 12px;border-radius:12px;background:var(--purple-light);color:var(--purple-dark);white-space:nowrap;}
   .mode-badge.editing{background:#fcebd8;color:#8a4b10;}
 
+  .extra-item{border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:10px;background:#fbfafd;}
+  .extra-item .row{display:flex;gap:8px;margin-bottom:8px;}
+  .extra-item input{flex:1;}
+  .extra-item textarea{min-height:90px;width:100%;}
+  .extra-item .rm{background:#fff;color:#b3261e;border:1px solid #b3261e;border-radius:var(--radius);padding:0 14px;cursor:pointer;font:inherit;font-weight:700;}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px;}
+  .gallery figure{margin:0;border:1px solid var(--border);border-radius:var(--radius);background:#fff;padding:6px;text-align:center;cursor:zoom-in;}
+  .gallery img{width:100%;height:110px;object-fit:cover;border-radius:2px;display:block;}
+  .gallery figcaption{font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all;direction:ltr;}
+  .gallery .note{grid-column:1/-1;color:var(--muted);font-size:12.5px;}
+  #lightbox{display:none;position:fixed;inset:0;background:rgba(20,10,35,.88);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:20px;cursor:zoom-out;}
+  #lightbox.on{display:flex;}
+  #lightbox img{max-width:94vw;max-height:80vh;background:#fff;border-radius:3px;}
+  #lightbox .cap{color:#fff;font-size:14px;direction:ltr;}
+  #lightbox a{color:#cfe8ff;font-size:13px;}
   .attach-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
   .attach-item{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px;}
   .attach-item a{color:var(--blue);text-decoration:none;}
@@ -100,6 +117,7 @@
 </div></div>
 <header class="topbar"><div class="container">
   <span class="title"><?= appName ?></span>
+  <a class="navlink" href="<?= baseUrl ?>?page=reports" target="_top">كل التقارير</a>
   <span class="user" title="مسجّل الدخول بحساب الجامعة"><?= userEmail ?></span>
 </div></header>
 <div class="diag"></div>
@@ -223,11 +241,19 @@
     </div>
 
     <div class="card">
+      <h2>مقاطع إضافية</h2>
+      <p class="page-sub" style="margin:0 0 12px;">أضِف أي مقطع جديد للتقرير بعنوان ومحتوى من اختيارك؛ يظهر في Word وPDF والطباعة قبل قسم الاعتماد.</p>
+      <div id="extraList"></div>
+      <button type="button" class="btn-secondary" id="addExtraBtn">+ إضافة مقطع</button>
+    </div>
+
+    <div class="card">
       <h2>المرفقات</h2>
       <div class="file-input-wrap">
         <input type="file" id="attachInput" multiple>
         <div class="pending-files" id="pendingFiles"></div>
         <div id="existingAttachments"></div>
+        <div class="gallery" id="attachGallery"></div>
       </div>
     </div>
 
@@ -249,10 +275,13 @@
       <button type="button" class="btn-secondary" id="resetBtn">مسح النموذج</button>
       <button type="button" class="btn-accent" id="saveBtn">حفظ في النظام</button>
       <button type="submit" class="btn-primary" id="generateBtn">إنشاء مستند Word</button>
+      <button type="button" class="btn-accent" id="pdfBtn">إنشاء PDF</button>
+      <button type="button" class="btn-accent" id="pdfSrvBtn" disabled title="يتطلب تقريرًا محفوظًا">PDF من الخادم</button>
     </div>
     <div class="status" id="status"></div>
   </form>
 </div></main>
+<div id="lightbox"><img alt=""><div class="cap"></div><a target="_blank" rel="noopener" style="display:none">فتح في Drive</a></div>
 
 <footer><div class="container">
   <div>الإصدار <span class="ver" dir="ltr">v<?= version ?></span></div>
@@ -270,7 +299,7 @@
 
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType,
         AlignmentType, ShadingType, BorderStyle, Header, Footer, PageNumber,
-        VerticalAlign, TableBorders, HeightRule } = docx;
+        VerticalAlign, TableBorders, HeightRule, ImageRun } = docx;
 
 const FONT = "Arial";
 const PURPLE = "501E8C";
@@ -298,6 +327,33 @@ const FIELD_IDS = [
 
 function val(id){ return document.getElementById(id).value.trim(); }
 function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v || ""; }
+
+function arNum(n){ return String(n).replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩".charAt(Number(d))); }
+
+/* ---------- المقاطع الإضافية ---------- */
+function addExtra(title, content){
+  const wrap = document.createElement("div");
+  wrap.className = "extra-item";
+  const row = document.createElement("div"); row.className = "row";
+  const t = document.createElement("input"); t.type = "text"; t.placeholder = "عنوان المقطع"; t.value = title || ""; t.className = "ex-title";
+  const rm = document.createElement("button"); rm.type = "button"; rm.className = "rm"; rm.textContent = "حذف";
+  rm.addEventListener("click", function () { wrap.remove(); });
+  row.appendChild(t); row.appendChild(rm);
+  const c = document.createElement("textarea"); c.placeholder = "محتوى المقطع"; c.value = content || ""; c.className = "ex-content";
+  wrap.appendChild(row); wrap.appendChild(c);
+  document.getElementById("extraList").appendChild(wrap);
+  return wrap;
+}
+function getExtras(){
+  return Array.from(document.querySelectorAll("#extraList .extra-item")).map(function (w) {
+    return { title: w.querySelector(".ex-title").value.trim(), content: w.querySelector(".ex-content").value.trim() };
+  }).filter(s => s.title || s.content);
+}
+function setExtras(list){
+  document.getElementById("extraList").innerHTML = "";
+  (Array.isArray(list) ? list : []).forEach(s => addExtra(s.title, s.content));
+}
+document.getElementById("addExtraBtn").addEventListener("click", function () { addExtra("", "").querySelector(".ex-title").focus(); });
 
 function isArabicText(text){
   return /[ء-ي]/.test(String(text || ""));
@@ -328,28 +384,29 @@ function fieldRow(label, value, opts){
     cantSplit: true,
     children: [
       new TableCell({
-        width: { size: 2600, type: WidthType.DXA }, shading: { fill: PURPLE_LIGHT, type: ShadingType.CLEAR },
+        width: { size: 2800, type: WidthType.DXA }, shading: { fill: PURPLE_LIGHT, type: ShadingType.CLEAR },
         borders: cellBorders, verticalAlign: VerticalAlign.CENTER, margins: { top: 90, bottom: 90, left: 140, right: 140 },
-        children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: label, bold: true, size: 20, color: PURPLE_DARK, font: FONT, rightToLeft: true }) ] }) ]
+        children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ new TextRun({ text: label, bold: true, size: 20, color: PURPLE_DARK, font: FONT, rightToLeft: true }) ] }) ]
       }),
       new TableCell({
-        width: { size: 6400, type: WidthType.DXA }, shading: { fill: opts.fill || "FFFFFF", type: ShadingType.CLEAR },
+        width: { size: 7100, type: WidthType.DXA }, shading: { fill: opts.fill || "FFFFFF", type: ShadingType.CLEAR },
         borders: cellBorders, verticalAlign: VerticalAlign.CENTER, margins: { top: 90, bottom: 90, left: 140, right: 140 },
-        children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ valueRun(value, { color: opts.ink || INK, bold: !!opts.bold }) ] }) ]
+        children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ valueRun(value, { color: opts.ink || INK, bold: !!opts.bold }) ] }) ]
       })
     ]
   });
 }
 
 function sectionHeading(text, num){
-  return new Table({
-    width: { size: 9000, type: WidthType.DXA }, borders: noBorders,
+  const line = { style: BorderStyle.SINGLE, size: 10, color: "000000" };
+  return new Table({ visuallyRightToLeft: true,
+    width: { size: 9900, type: WidthType.DXA }, borders: noBorders,
     rows: [ new TableRow({ children: [ new TableCell({
-      width: { size: 9000, type: WidthType.DXA }, shading: { fill: PURPLE, type: ShadingType.CLEAR }, borders: noBorders,
-      margins: { top: 80, bottom: 80, left: 160, right: 160 },
-      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [
-        new TextRun({ text: text, bold: true, size: 21, color: "FFFFFF", font: FONT, rightToLeft: true }),
-        new TextRun({ text: "  " + num, bold: true, size: 18, color: BLUE_LIGHT, font: FONT, rightToLeft: true })
+      width: { size: 9900, type: WidthType.DXA }, borders: Object.assign({}, noBorders, { bottom: line }),
+      margins: { top: 60, bottom: 60, left: 80, right: 80 },
+      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [
+        new TextRun({ text: num + "  ", bold: true, size: 24, color: "000000", font: FONT, rightToLeft: true }),
+        new TextRun({ text: text, bold: true, size: 24, color: "000000", font: FONT, rightToLeft: true })
       ] }) ]
     }) ] }) ]
   });
@@ -360,12 +417,12 @@ function spacer(h){ return new Paragraph({ spacing: { after: h || 120 }, childre
 function bodyBox(text){
   const lines = (text || "").trim();
   const content = lines.length
-    ? lines.split("\n").filter(l => l.length > 0).map(l => new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 90 }, children: [ valueRun(l) ] }))
-    : [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: "لم يتم إدخال بيانات لهذا القسم.", italics: true, size: 20, color: MUTED, font: FONT, rightToLeft: true }) ] }) ];
-  return new Table({
-    width: { size: 9000, type: WidthType.DXA },
+    ? lines.split("\n").filter(l => l.length > 0).map(l => new Paragraph({ bidirectional: true, alignment: AlignmentType.START, spacing: { after: 90 }, children: [ valueRun(l) ] }))
+    : [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ new TextRun({ text: "لم يتم إدخال بيانات لهذا القسم.", italics: true, size: 20, color: MUTED, font: FONT, rightToLeft: true }) ] }) ];
+  return new Table({ visuallyRightToLeft: true,
+    width: { size: 9900, type: WidthType.DXA },
     rows: [ new TableRow({ children: [ new TableCell({
-      width: { size: 9000, type: WidthType.DXA }, shading: { fill: "FBFAFD", type: ShadingType.CLEAR }, borders: cellBorders,
+      width: { size: 9900, type: WidthType.DXA }, shading: { fill: "FBFAFD", type: ShadingType.CLEAR }, borders: cellBorders,
       margins: { top: 140, bottom: 140, left: 180, right: 180 }, children: content
     }) ] }) ]
   });
@@ -375,76 +432,159 @@ function titleBlockRow(label, value){
   return new TableRow({ children: [
     new TableCell({
       width: { size: 3000, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER,
-      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: label, size: 18, color: BLUE_LIGHT, font: FONT, rightToLeft: true }) ] }) ]
+      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ new TextRun({ text: label, size: 18, bold: true, color: "000000", font: FONT, rightToLeft: true }) ] }) ]
     }),
     new TableCell({
       width: { size: 6000, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER,
-      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ valueRun(value, { bold: true, color: "FFFFFF" }) ] }) ]
+      children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ valueRun(value, { bold: true, color: "000000" }) ] }) ]
     })
   ]});
 }
 
+/* ---------- images (logos + attachments) ---------- */
+function dataUriToBytes(uri){
+  const bin = atob(String(uri).split(",")[1] || "");
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function loadImg(src){
+  return new Promise(function (res, rej) {
+    const im = new Image();
+    im.onload = function () { res(im); };
+    im.onerror = function () { rej(new Error("image load failed")); };
+    im.src = src;
+  });
+}
+function fileToDataUri(file){
+  return new Promise(function (res, rej) {
+    const r = new FileReader();
+    r.onload = function () { res(String(r.result)); };
+    r.onerror = function () { rej(new Error("read failed")); };
+    r.readAsDataURL(file);
+  });
+}
+async function logoInfo(key){
+  try {
+    const uri = ITOC_LOGOS[key];
+    if (!uri) return null;
+    const im = await loadImg(uri);
+    return { bytes: dataUriToBytes(uri), w: im.naturalWidth, h: im.naturalHeight };
+  } catch (e) { return null; }
+}
+async function downscaleToJpeg(uri, maxW){
+  const im = await loadImg(uri);
+  const sc = Math.min(1, maxW / im.naturalWidth);
+  const w = Math.max(1, Math.round(im.naturalWidth * sc)), h = Math.max(1, Math.round(im.naturalHeight * sc));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(im, 0, 0, w, h);
+  const out = c.toDataURL("image/jpeg", 0.85);
+  return { uri: out, bytes: dataUriToBytes(out), w: w, h: h };
+}
+/* صور المرفقات: الملفات المختارة حديثًا، وإلا الصور المحفوظة في Drive للتقرير المحمّل */
+async function gatherAttachmentImages(){
+  const out = [];
+  try {
+    const pending = Array.from(attachInput.files || []).filter(f => /^image\//.test(f.type));
+    if (pending.length) {
+      for (const f of pending) {
+        try { const d = await downscaleToJpeg(await fileToDataUri(f), 1200); d.name = f.name; out.push(d); } catch (e) {}
+      }
+      return out;
+    }
+    if (currentRow) {
+      const list = await new Promise(function (res) {
+        google.script.run.withSuccessHandler(res).withFailureHandler(function () { res([]); }).getAttachmentImages(currentRow);
+      });
+      for (const it of (list || [])) {
+        try { const d = await downscaleToJpeg("data:" + it.mime + ";base64," + it.base64, 1200); d.name = it.name; out.push(d); } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  return out;
+}
+
 async function buildDocx(data){
+  const LOGO = { sru: await logoInfo("sru"), ictd: await logoInfo("ictd") };
+  const logoRun = (L, hgt) => L ? new ImageRun({ data: L.bytes, transformation: { width: Math.round(hgt * L.w / L.h), height: hgt } }) : new TextRun({ text: "" });
+  const extras = data.extraSections || [];
+  const extraBlocks = [];
+  extras.forEach(function (s, i) {
+    extraBlocks.push(sectionHeading(s.title || "مقطع إضافي", arNum(8 + i)), spacer(60), bodyBox(s.content), spacer(220));
+  });
+  const imgs = data.images || [];
+  const attachmentBlocks = [];
+  if (data.attachmentNames && data.attachmentNames.length) {
+    attachmentBlocks.push(new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, rows: data.attachmentNames.map((name, i) => fieldRow("مرفق " + (i + 1), isArabicText(name) ? name : "\u200E" + name + "\u200E")) }));
+  } else if (!imgs.length) {
+    attachmentBlocks.push(bodyBox(""));
+  }
+  imgs.forEach(function (im) {
+    const sc = Math.min(1, 560 / im.w, 640 / im.h);
+    attachmentBlocks.push(spacer(100));
+    attachmentBlocks.push(new Paragraph({ bidirectional: true, alignment: AlignmentType.START, keepNext: true, spacing: { after: 60 }, children: [ new TextRun({ text: isArabicText(im.name) ? (im.name || "") : "\u200E" + (im.name || "") + "\u200E", bold: true, size: 18, color: "000000", font: FONT, rightToLeft: isArabicText(im.name) }) ] }));
+    attachmentBlocks.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [ new ImageRun({ data: im.bytes, transformation: { width: Math.round(im.w * sc), height: Math.round(im.h * sc) } }) ] }));
+  });
+
   const sevColor = SEV_COLORS[data.severity] || SEV_COLORS["متوسطة"];
-  const genDate = new Date().toLocaleDateString("ar-EG-u-ca-gregory");
+  const genDate = new Date().toLocaleDateString("en-GB");
 
   const doc = new Document({
     sections: [{
       properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 900, bottom: 900, left: 1000, right: 1000 } } },
       headers: { default: new Header({ children: [
-        new Table({ width: { size: 9000, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [
-          new TableCell({ width: { size: 6300, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER, children: [
-            new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: "جامعة سليمان الراجحي", bold: true, size: 18, color: PURPLE_DARK, font: FONT, rightToLeft: true }) ] }),
-            new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: "الإدارة التنفيذية للاتصالات وتقنية المعلومات", size: 15, color: MUTED, font: FONT, rightToLeft: true }) ] })
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [
+          new TableCell({ width: { size: 6900, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER, children: [
+            new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ logoRun(LOGO.sru, 44) ] })
           ] }),
-          new TableCell({ width: { size: 2700, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER,
-            children: [ new Paragraph({ alignment: AlignmentType.LEFT, children: [ new TextRun({ text: "ICTD", bold: true, size: 20, color: BLUE, font: FONT }) ] }) ] })
+          new TableCell({ width: { size: 3000, type: WidthType.DXA }, borders: noBorders, verticalAlign: VerticalAlign.CENTER,
+            children: [ new Paragraph({ alignment: AlignmentType.LEFT, children: [ logoRun(LOGO.ictd, 48) ] }) ] })
         ] }) ] }),
         new Paragraph({ border: { bottom: { color: PURPLE, space: 4, style: BorderStyle.SINGLE, size: 8 } }, spacing: { after: 0 }, children: [] })
       ] }) },
       footers: { default: new Footer({ children: [
         new Paragraph({ border: { top: { color: BORDER, space: 4, style: BorderStyle.SINGLE, size: 4 } }, spacing: { after: 60 }, children: [] }),
-        new Table({ width: { size: 9000, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [
-          new TableCell({ width: { size: 4500, type: WidthType.DXA }, borders: noBorders,
-            children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: "مستند داخلي — سري", size: 14, color: MUTED, font: FONT, rightToLeft: true }) ] }) ] }),
-          new TableCell({ width: { size: 4500, type: WidthType.DXA }, borders: noBorders, children: [ new Paragraph({ alignment: AlignmentType.LEFT, children: [
-            new TextRun({ text: "صفحة ", size: 14, color: MUTED, font: FONT }),
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [
+          new TableCell({ width: { size: 4950, type: WidthType.DXA }, borders: noBorders,
+            children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [ new TextRun({ text: "مستند داخلي — سري", size: 14, color: MUTED, font: FONT, rightToLeft: true }) ] }) ] }),
+          new TableCell({ width: { size: 4950, type: WidthType.DXA }, borders: noBorders, children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.END, children: [
+            new TextRun({ text: "صفحة ", size: 14, color: MUTED, font: FONT, rightToLeft: true }),
             new TextRun({ children: [PageNumber.CURRENT], size: 14, color: MUTED, font: FONT }),
-            new TextRun({ text: " من ", size: 14, color: MUTED, font: FONT }),
+            new TextRun({ text: " من ", size: 14, color: MUTED, font: FONT, rightToLeft: true }),
             new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 14, color: MUTED, font: FONT }),
           ] }) ] })
         ] }) ] })
       ] }) },
       children: [
-        new Table({ width: { size: 9000, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [ new TableCell({
-          width: { size: 9000, type: WidthType.DXA }, shading: { fill: PURPLE_DARK, type: ShadingType.CLEAR }, borders: noBorders,
-          margins: { top: 260, bottom: 220, left: 260, right: 260 }, children: [
-            new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 40 }, children: [ new TextRun({ text: "تقرير حادثة تقنية معلومات", bold: true, size: 36, color: "FFFFFF", font: FONT, rightToLeft: true }) ] }),
-            new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 200 }, children: [ new TextRun({ text: data.title || "حادثة بدون عنوان", size: 22, color: BLUE_LIGHT, italics: true, font: FONT, rightToLeft: isArabicText(data.title) }) ] }),
-            new Table({ width: { size: 8500, type: WidthType.DXA }, borders: noBorders, rows: [
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [ new TableCell({
+          width: { size: 9900, type: WidthType.DXA }, shading: { fill: "FFFFFF", type: ShadingType.CLEAR }, borders: { top: { style: BorderStyle.SINGLE, size: 12, color: PURPLE }, bottom: { style: BorderStyle.SINGLE, size: 12, color: PURPLE }, left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }, right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } },
+          margins: { top: 200, bottom: 160, left: 260, right: 260 }, children: [
+            new Paragraph({ bidirectional: true, alignment: AlignmentType.START, spacing: { after: 40 }, children: [ new TextRun({ text: "تقرير حادثة تقنية معلومات", bold: true, size: 36, color: "000000", font: FONT, rightToLeft: true }) ] }),
+            new Paragraph({ bidirectional: true, alignment: AlignmentType.START, spacing: { after: 200 }, children: [ new TextRun({ text: data.title || "حادثة بدون عنوان", size: 22, color: "333333", bold: true, font: FONT, rightToLeft: isArabicText(data.title) }) ] }),
+            new Table({ visuallyRightToLeft: true, width: { size: 8500, type: WidthType.DXA }, borders: noBorders, rows: [
               titleBlockRow("رقم الحادثة:", data.incidentId || "—"),
               titleBlockRow("تاريخ إنشاء التقرير:", genDate)
             ] })
           ]
         }) ] }) ]}),
         spacer(60),
-        new Table({ width: { size: 9000, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [ new TableCell({
-          width: { size: 9000, type: WidthType.DXA }, shading: { fill: sevColor.fill, type: ShadingType.CLEAR }, borders: cellBorders,
-          margins: { top: 100, bottom: 100, left: 180, right: 180 }, children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, children: [
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, borders: noBorders, rows: [ new TableRow({ children: [ new TableCell({
+          width: { size: 9900, type: WidthType.DXA }, shading: { fill: sevColor.fill, type: ShadingType.CLEAR }, borders: cellBorders,
+          margins: { top: 100, bottom: 100, left: 180, right: 180 }, children: [ new Paragraph({ bidirectional: true, alignment: AlignmentType.START, children: [
             new TextRun({ text: "مستوى الخطورة:  ", bold: true, size: 20, color: sevColor.ink, font: FONT, rightToLeft: true }),
             new TextRun({ text: data.severity || "—", bold: true, size: 22, color: sevColor.ink, font: FONT, rightToLeft: isArabicText(data.severity) })
           ] }) ]
         }) ] }) ]}),
         spacer(180),
         sectionHeading("بيانات الحادثة", "١"), spacer(60),
-        new Table({ width: { size: 9000, type: WidthType.DXA }, rows: [
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, rows: [
           fieldRow("الإدارة / القسم", data.department), fieldRow("تاريخ الحادثة", data.incidentDate),
           fieldRow("وقت الحادثة", data.incidentTime), fieldRow("الموقع / النظام المتأثر", data.location),
           fieldRow("التصنيف", data.category)
         ] }),
         spacer(220),
         sectionHeading("بيانات مقدّم البلاغ", "٢"), spacer(60),
-        new Table({ width: { size: 9000, type: WidthType.DXA }, rows: [
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, rows: [
           fieldRow("مقدّم البلاغ", data.reporterName), fieldRow("المسمى الوظيفي", data.reporterTitle),
           fieldRow("وسيلة التواصل", data.reporterContact), fieldRow("تاريخ التقرير", data.reportDate)
         ] }),
@@ -454,17 +594,14 @@ async function buildDocx(data){
         sectionHeading("السبب الجذري", "٥"), spacer(60), bodyBox(data.rootCause), spacer(220),
         sectionHeading("تقييم الأثر", "٦"), spacer(60), bodyBox(data.impact), spacer(220),
         sectionHeading("التوصيات / الإجراءات التصحيحية", "٧"), spacer(60), bodyBox(data.recommendations), spacer(220),
-        sectionHeading("الاعتماد", "٨"), spacer(60),
-        new Table({ width: { size: 9000, type: WidthType.DXA }, rows: [
+        ...extraBlocks,
+        sectionHeading("الاعتماد", arNum(8 + extras.length)), spacer(60),
+        new Table({ visuallyRightToLeft: true, width: { size: 9900, type: WidthType.DXA }, rows: [
           fieldRow("أُعد بواسطة", data.preparedBy), fieldRow("روجع / اعتمد بواسطة", data.approvedBy)
         ] }),
         spacer(220),
-        sectionHeading("المرفقات", "٩"), spacer(60),
-        (data.attachmentNames && data.attachmentNames.length)
-          ? new Table({ width: { size: 9000, type: WidthType.DXA }, rows:
-              data.attachmentNames.map((name, i) => fieldRow("مرفق " + (i + 1), name))
-            })
-          : bodyBox(""),
+        sectionHeading("المرفقات", arNum(9 + extras.length)), spacer(60),
+        ...attachmentBlocks,
       ]
     }]
   });
@@ -473,6 +610,12 @@ async function buildDocx(data){
 }
 
 /* ------------------------- Data collection / fill ------------------------- */
+
+function currentAttachmentNames(){
+  const pending = Array.from((document.getElementById("attachInput").files) || []).map(f => f.name);
+  if (pending.length) return pending;
+  return Array.from(document.querySelectorAll("#existingAttachments .attach-item")).map(e => e.textContent.replace(/^\d+\.\s*/, "").trim());
+}
 
 function collectFormData(){
   return {
@@ -494,7 +637,9 @@ function collectFormData(){
     impact: val("impact"),
     recommendations: val("recommendations"),
     preparedBy: val("preparedBy"),
-    approvedBy: val("approvedBy")
+    approvedBy: val("approvedBy"),
+    extraSections: getExtras(),
+    attachmentNames: currentAttachmentNames()
   };
 }
 
@@ -506,6 +651,7 @@ function fillForm(data){
   const sevInput = document.querySelector('input[name="severity"][value="' + (data.severity || "متوسطة") + '"]');
   if (sevInput) sevInput.checked = true;
 
+  setExtras(data.extraSections);
   renderExistingAttachments(data.attachmentNames, data.attachmentLinks);
   clearPendingFiles();
 }
@@ -514,11 +660,53 @@ function clearForm(){
   document.getElementById("incidentForm").reset();
   setVal("incidentId", "");
   document.getElementById("status").textContent = "";
+  setExtras([]);
   renderExistingAttachments([], []);
+  galleryEl.innerHTML = "";
   clearPendingFiles();
 }
 
 /* ------------------------------ Attachments ------------------------------ */
+
+const galleryEl = document.getElementById("attachGallery");
+const lightbox = document.getElementById("lightbox");
+lightbox.addEventListener("click", function (e) { if (e.target.tagName !== "A") lightbox.classList.remove("on"); });
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") lightbox.classList.remove("on"); });
+function openLightbox(src, name, url){
+  lightbox.querySelector("img").src = src;
+  lightbox.querySelector(".cap").textContent = name || "";
+  const a = lightbox.querySelector("a");
+  if (url) { a.href = url; a.style.display = ""; } else { a.style.display = "none"; }
+  lightbox.classList.add("on");
+}
+const PREVIEW_CACHE = {};
+function showPreviews(list){
+  galleryEl.innerHTML = "";
+  (list || []).forEach(function (it) {
+    const src = "data:" + it.mime + ";base64," + it.base64;
+    const fig = document.createElement("figure");
+    const im = document.createElement("img"); im.src = src; im.alt = it.name || "";
+    const cap = document.createElement("figcaption"); cap.textContent = it.name || "";
+    fig.appendChild(im); fig.appendChild(cap);
+    fig.addEventListener("click", function () { openLightbox(src, it.name, it.url); });
+    galleryEl.appendChild(fig);
+  });
+}
+function loadPreviews(row){
+  galleryEl.innerHTML = "";
+  if (!row) return;
+  if (PREVIEW_CACHE[row]) { showPreviews(PREVIEW_CACHE[row]); return; }
+  galleryEl.innerHTML = '<div class="note">جارٍ تحميل صور المرفقات...</div>';
+  google.script.run
+    .withSuccessHandler(function (list) {
+      if (currentRow !== row) return;
+      PREVIEW_CACHE[row] = list || [];
+      if (!PREVIEW_CACHE[row].length) { galleryEl.innerHTML = ""; return; }
+      showPreviews(PREVIEW_CACHE[row]);
+    })
+    .withFailureHandler(function () { galleryEl.innerHTML = ""; })
+    .getAttachmentImages(row);
+}
 
 const attachInput = document.getElementById("attachInput");
 const pendingFilesEl = document.getElementById("pendingFiles");
@@ -579,6 +767,7 @@ let currentRow = 0;
 
 function setMode(row){
   currentRow = row || 0;
+  document.getElementById("pdfSrvBtn").disabled = !currentRow;
   if (currentRow){
     modeBadge.textContent = "تعديل تقرير محفوظ (صف " + currentRow + ")";
     modeBadge.classList.add("editing");
@@ -618,6 +807,7 @@ reportSelect.addEventListener("change", function () {
       if (!data) { historyStatus.textContent = "تعذّر العثور على التقرير."; return; }
       fillForm(data);
       setMode(row);
+      loadPreviews(row);
       historyStatus.textContent = "تم تحميل التقرير " + (data.incidentId || "رقم الصف " + row);
     })
     .withFailureHandler(function (e) {
@@ -672,6 +862,8 @@ document.getElementById("saveBtn").addEventListener("click", async function () {
       setMode(result.row);
       clearPendingFiles();
       if (result.attachmentNames) renderExistingAttachments(result.attachmentNames, result.attachmentLinks);
+      delete PREVIEW_CACHE[result.row];
+      loadPreviews(result.row);
       refreshReportList(true);
       reportSelect.value = result.row;
     })
@@ -702,6 +894,7 @@ document.getElementById("incidentForm").addEventListener("submit", async (e) => 
   }
   try{
     status.textContent = "جارٍ إنشاء المستند...";
+    data.images = await gatherAttachmentImages();
     const blob = await buildDocx(data);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -719,6 +912,84 @@ document.getElementById("incidentForm").addEventListener("submit", async (e) => 
     status.className = "status err";
     status.textContent = "حدث خطأ أثناء إنشاء المستند. يرجى المحاولة مرة أخرى.";
   }
+});
+
+/* ------------------------------ PDF (print layout, RTL) ------------------------------ */
+function escHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function buildPrintHtml(d){
+  const sev = SEV_COLORS[d.severity] || SEV_COLORS["متوسطة"];
+  const gen = new Date().toLocaleDateString("en-GB");
+  const row = (l, v) => '<tr><th>' + l + '</th><td>' + (escHtml(v) || "—") + '</td></tr>';
+  const box = t => '<div class="box">' + (String(t || "").trim() ? escHtml(t).replace(/\n/g, "<br>") : '<i class="muted">لم يتم إدخال بيانات لهذا القسم.</i>') + '</div>';
+  const sec = (t, n) => '<h2>' + n + ' — ' + t + '</h2>';
+  const names = (d.attachmentNames && d.attachmentNames.length) ? '<table>' + d.attachmentNames.map((n, i) => row("مرفق " + (i + 1), n)).join("") + '</table>' : "";
+  const imgs = (d.images || []).map(im => '<figure><figcaption>' + escHtml(im.name) + '</figcaption><img src="' + im.uri + '"></figure>').join("");
+  const att = (names || imgs) ? names + imgs : box("");
+  const exs = d.extraSections || [];
+  const exHtml = exs.map((s, i) => sec(escHtml(s.title || "مقطع إضافي"), arNum(8 + i)) + box(s.content)).join("");
+  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير حادثة</title><style>' +
+  '@page{size:A4;margin:14mm 14mm 16mm}*{box-sizing:border-box}body{margin:0;font-family:Cairo,Tahoma,Arial,sans-serif;color:#000;font-size:11pt;direction:rtl;text-align:right;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+  '.top{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #501e8c;padding-bottom:6px;margin-bottom:10px}.top img{height:46px;width:auto}' +
+  '.title{border-top:3px solid #501e8c;border-bottom:3px solid #501e8c;padding:10px 4px}.title h1{margin:0 0 4px;font-size:20pt;color:#000;font-weight:800}.title p{margin:0 0 6px;color:#222;font-weight:700}.title table{width:auto}.title td,.title th{border:0;background:none;color:#000;padding:1px 0 1px 14px;font-weight:700}' +
+  '.sev{margin:8px 0 12px;padding:7px 14px;border:1px solid #d9cfec;font-weight:700;background:#' + sev.fill + ';color:#' + sev.ink + '}' +
+  'h2{color:#000;font-weight:800;font-size:13pt;margin:16px 0 6px;padding:0 0 3px;border-bottom:2px solid #000;break-after:avoid}' +
+  'table{width:100%;border-collapse:collapse;break-inside:avoid}th,td{border:1px solid #d9cfec;padding:5px 10px;text-align:right;vertical-align:middle}th{width:28%;background:#f0ebf8;color:#000;font-weight:800}td{unicode-bidi:plaintext}' +
+  '.box{border:1px solid #d9cfec;background:#fbfafd;padding:9px 12px;line-height:1.8;unicode-bidi:plaintext}.muted{color:#555}' +
+  'figure{margin:10px 0;break-inside:avoid;text-align:center}figcaption{font-weight:700;text-align:right;margin-bottom:4px;font-size:10pt}figure img{max-width:100%;max-height:200mm;border:1px solid #d9cfec}' +
+  '.foot{margin-top:14px;border-top:1px solid #d9cfec;padding-top:4px;font-size:8pt;color:#555}' +
+  '</style></head><body>' +
+  '<div class="top"><img src="' + (ITOC_LOGOS.sru || "") + '" alt=""><img src="' + (ITOC_LOGOS.ictd || "") + '" alt=""></div>' +
+  '<div class="title"><h1>تقرير حادثة تقنية معلومات</h1><p>' + escHtml(d.title || "حادثة بدون عنوان") + '</p><table><tr><th>رقم الحادثة:</th><td>' + escHtml(d.incidentId || "—") + '</td></tr><tr><th>تاريخ إنشاء التقرير:</th><td>' + gen + '</td></tr></table></div>' +
+  '<div class="sev">مستوى الخطورة: ' + escHtml(d.severity || "—") + '</div>' +
+  sec("بيانات الحادثة", "١") + '<table>' + row("الإدارة / القسم", d.department) + row("تاريخ الحادثة", d.incidentDate) + row("وقت الحادثة", d.incidentTime) + row("الموقع / النظام المتأثر", d.location) + row("التصنيف", d.category) + '</table>' +
+  sec("بيانات مقدّم البلاغ", "٢") + '<table>' + row("مقدّم البلاغ", d.reporterName) + row("المسمى الوظيفي", d.reporterTitle) + row("وسيلة التواصل", d.reporterContact) + row("تاريخ التقرير", d.reportDate) + '</table>' +
+  sec("وصف الحادثة", "٣") + box(d.description) + sec("الإجراءات الفورية المتخذة", "٤") + box(d.actionsTaken) + sec("السبب الجذري", "٥") + box(d.rootCause) +
+  sec("تقييم الأثر", "٦") + box(d.impact) + sec("التوصيات / الإجراءات التصحيحية", "٧") + box(d.recommendations) +
+  exHtml + sec("الاعتماد", arNum(8 + exs.length)) + '<table>' + row("أُعد بواسطة", d.preparedBy) + row("روجع / اعتمد بواسطة", d.approvedBy) + '</table>' +
+  sec("المرفقات", arNum(9 + exs.length)) + att +
+  '<div class="foot">مستند داخلي — سري</div></body></html>';
+}
+
+document.getElementById("pdfSrvBtn").addEventListener("click", function () {
+  const btn = this, old = btn.textContent, status = document.getElementById("status");
+  if (!currentRow) return;
+  btn.disabled = true; btn.textContent = "جارٍ التجهيز...";
+  google.script.run
+    .withSuccessHandler(function (f) {
+      btn.disabled = false; btn.textContent = old;
+      const bin = atob(f.base64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      status.className = "status ok"; status.textContent = "تم تنزيل ملف PDF.";
+    })
+    .withFailureHandler(function (e) { btn.disabled = false; btn.textContent = old; status.className = "status err"; status.textContent = "تعذّر إنشاء PDF: " + e.message; })
+    .exportReportsPdf(currentRow);
+});
+
+document.getElementById("pdfBtn").addEventListener("click", async function () {
+  const status = document.getElementById("status");
+  const data = collectFormData();
+  if (!data.title || !data.department || !data.incidentDate || !data.reporterName || !data.description){
+    status.className = "status err";
+    status.textContent = "يرجى تعبئة جميع الحقول الإلزامية (المشار إليها بـ *).";
+    return;
+  }
+  status.className = "status info"; status.textContent = "جارٍ تجهيز الصور...";
+  data.images = await gatherAttachmentImages();
+  let frame = document.getElementById("printFrame");
+  if (frame) frame.remove();
+  frame = document.createElement("iframe");
+  frame.id = "printFrame";
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  document.body.appendChild(frame);
+  frame.srcdoc = buildPrintHtml(data);
+  frame.onload = function () {
+    setTimeout(function () { frame.contentWindow.focus(); frame.contentWindow.print(); }, 400);
+  };
+  status.className = "status info";
+  status.textContent = "في نافذة الطباعة اختر «حفظ كـ PDF» (Save as PDF).";
 });
 </script>
 </body>
